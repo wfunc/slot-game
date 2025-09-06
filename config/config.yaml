@@ -1,0 +1,198 @@
+# 推币机游戏后端配置文件
+# 复制此文件为 config.yaml 并根据实际环境修改配置
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "development" # development, production, test
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 10s
+
+# 数据库配置
+database:
+  driver: "sqlite"
+  dsn: "./data/slot-game.db"
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 1h
+  log_level: "info" # silent, error, warn, info
+  auto_migrate: true
+
+# WebSocket配置
+websocket:
+  host: "0.0.0.0"
+  port: 8081
+  path: "/ws"
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  max_message_size: 8192
+  ping_interval: 30s
+  pong_timeout: 60s
+  write_timeout: 10s
+  enable_compression: true
+
+# 串口配置
+serial:
+  port: "/dev/ttyUSB0"
+  baud_rate: 115200
+  data_bits: 8
+  stop_bits: 1
+  parity: "N" # N-无校验, O-奇校验, E-偶校验
+  read_timeout: 1s
+  write_timeout: 1s
+  retry_times: 3
+  retry_interval: 500ms
+
+# MQTT配置
+mqtt:
+  enabled: true
+  broker: "tcp://localhost:1883"
+  client_id: "slot-game-001"
+  username: ""
+  password: ""
+  qos: 1
+  retained: false
+  clean_session: true
+  auto_reconnect: true
+  max_reconnect_interval: 1m
+  keep_alive: 60s
+  ping_timeout: 10s
+  topics:
+    status: "device/{client_id}/status"
+    command: "device/{client_id}/command"
+    config: "device/{client_id}/config"
+    event: "device/{client_id}/event"
+
+# 游戏配置
+game:
+  # 老虎机配置
+  slot:
+    reels: 3 # 转轮数量
+    symbols: ["🍒", "🍋", "🍊", "🍉", "⭐", "💎", "7️⃣"]
+    spin_duration: 3s
+    
+    # 中奖概率配置 (总和应为100%)
+    win_rates:
+      jackpot: 0.1   # 大奖 0.1%
+      big_win: 1.0   # 大赢 1%
+      medium_win: 5.0 # 中等奖励 5%
+      small_win: 20.0 # 小奖 20%
+      no_win: 73.9   # 不中奖 73.9%
+    
+    # 奖励倍数配置
+    payouts:
+      "7️⃣,7️⃣,7️⃣": 100    # 三个7
+      "💎,💎,💎": 50      # 三个钻石
+      "⭐,⭐,⭐": 30      # 三个星星
+      "🍉,🍉,🍉": 20      # 三个西瓜
+      "🍊,🍊,🍊": 15      # 三个橙子
+      "🍋,🍋,🍋": 10      # 三个柠檬
+      "🍒,🍒,🍒": 5       # 三个樱桃
+  
+  # 推币机配置
+  pusher:
+    default_force: 50      # 默认推币力度 (0-100)
+    min_force: 20         # 最小推币力度
+    max_force: 100        # 最大推币力度
+    push_duration: 500ms  # 单次推币持续时间
+    push_interval: 1s     # 推币间隔时间
+    
+    # 根据中奖等级的推币配置
+    push_config:
+      jackpot:
+        count: 10      # 推币次数
+        force: 100     # 推币力度
+      big_win:
+        count: 5
+        force: 80
+      medium_win:
+        count: 3
+        force: 60
+      small_win:
+        count: 1
+        force: 40
+  
+  # 币数管理配置
+  coin:
+    price_per_coin: 1.0   # 每个币的价格（元）
+    min_bet: 1           # 最小投注
+    max_bet: 10          # 最大投注
+    initial_coins: 100   # 初始币数
+    max_coins: 10000     # 最大币数限制
+
+# 日志配置
+log:
+  level: "info" # debug, info, warn, error, fatal
+  format: "json" # json, console
+  output: "both" # stdout, file, both
+  file:
+    path: "./logs"
+    filename: "slot-game.log"
+    max_size: 100 # MB
+    max_age: 30 # days
+    max_backups: 7
+    compress: true
+  
+  # 不同模块的日志级别
+  modules:
+    game: "debug"
+    serial: "info"
+    websocket: "info"
+    mqtt: "info"
+    database: "warn"
+
+# 监控配置
+monitor:
+  enabled: true
+  metrics_interval: 10s
+  health_check_interval: 30s
+  
+  # 告警阈值
+  alerts:
+    cpu_threshold: 80      # CPU使用率告警阈值(%)
+    memory_threshold: 80   # 内存使用率告警阈值(%)
+    error_rate: 10        # 错误率告警阈值(%)
+    response_time: 1000   # 响应时间告警阈值(ms)
+
+# 安全配置
+security:
+  # API限流配置
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+    burst: 10
+  
+  # JWT配置（用于远程管理）
+  jwt:
+    secret: "change-this-secret-key-in-production"
+    expire_hours: 24
+    refresh_hours: 168 # 7 days
+  
+  # 加密配置
+  encryption:
+    enabled: false
+    algorithm: "AES-256-GCM"
+    key: "change-this-encryption-key-in-production"
+
+# 系统配置
+system:
+  # 时区设置
+  timezone: "Asia/Shanghai"
+  
+  # 性能配置
+  max_procs: 0 # 0表示使用所有CPU核心
+  
+  # 缓存配置
+  cache:
+    enabled: true
+    size: 1000
+    ttl: 5m
+    
+  # 备份配置
+  backup:
+    enabled: true
+    interval: 24h
+    path: "./backups"
+    keep_days: 7

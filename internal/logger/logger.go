@@ -18,7 +18,7 @@ var (
 	sugar  *zap.SugaredLogger
 	once   sync.Once
 	mu     sync.RWMutex
-	
+
 	// 模块日志器
 	moduleLoggers map[string]*zap.Logger
 )
@@ -28,10 +28,10 @@ func Init(cfg *config.LogConfig) error {
 	var err error
 	once.Do(func() {
 		moduleLoggers = make(map[string]*zap.Logger)
-		
+
 		// 解析日志级别
 		level := parseLevel(cfg.Level)
-		
+
 		// 创建编码器配置
 		encoderConfig := zapcore.EncoderConfig{
 			TimeKey:        "time",
@@ -47,7 +47,7 @@ func Init(cfg *config.LogConfig) error {
 			EncodeDuration: zapcore.SecondsDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		}
-		
+
 		// 根据格式选择编码器
 		var encoder zapcore.Encoder
 		if cfg.Format == "json" {
@@ -56,10 +56,10 @@ func Init(cfg *config.LogConfig) error {
 			encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 			encoder = zapcore.NewConsoleEncoder(encoderConfig)
 		}
-		
+
 		// 创建输出核心
 		var cores []zapcore.Core
-		
+
 		// 控制台输出
 		if cfg.Output == "stdout" || cfg.Output == "both" {
 			consoleCore := zapcore.NewCore(
@@ -69,7 +69,7 @@ func Init(cfg *config.LogConfig) error {
 			)
 			cores = append(cores, consoleCore)
 		}
-		
+
 		// 文件输出
 		if cfg.Output == "file" || cfg.Output == "both" {
 			// 确保日志目录存在
@@ -77,7 +77,7 @@ func Init(cfg *config.LogConfig) error {
 			if err = os.MkdirAll(logDir, 0755); err != nil {
 				return
 			}
-			
+
 			// 创建文件写入器（支持日志轮转）
 			fileWriter := &lumberjack.Logger{
 				Filename:   filepath.Join(logDir, cfg.File.Filename),
@@ -86,14 +86,14 @@ func Init(cfg *config.LogConfig) error {
 				MaxBackups: cfg.File.MaxBackups, // 保留文件数
 				Compress:   cfg.File.Compress,   // 是否压缩
 			}
-			
+
 			fileCore := zapcore.NewCore(
 				encoder,
 				zapcore.AddSync(fileWriter),
 				level,
 			)
 			cores = append(cores, fileCore)
-			
+
 			// 创建错误日志文件
 			errorWriter := &lumberjack.Logger{
 				Filename:   filepath.Join(logDir, "error.log"),
@@ -102,7 +102,7 @@ func Init(cfg *config.LogConfig) error {
 				MaxBackups: cfg.File.MaxBackups,
 				Compress:   cfg.File.Compress,
 			}
-			
+
 			errorCore := zapcore.NewCore(
 				encoder,
 				zapcore.AddSync(errorWriter),
@@ -110,10 +110,10 @@ func Init(cfg *config.LogConfig) error {
 			)
 			cores = append(cores, errorCore)
 		}
-		
+
 		// 创建核心
 		core := zapcore.NewTee(cores...)
-		
+
 		// 创建日志器
 		logger = zap.New(
 			core,
@@ -121,9 +121,9 @@ func Init(cfg *config.LogConfig) error {
 			zap.AddCallerSkip(1),
 			zap.AddStacktrace(zapcore.ErrorLevel),
 		)
-		
+
 		sugar = logger.Sugar()
-		
+
 		// 初始化模块日志器
 		if cfg.Modules != nil {
 			for module, levelStr := range cfg.Modules {
@@ -141,7 +141,7 @@ func Init(cfg *config.LogConfig) error {
 			}
 		}
 	})
-	
+
 	return err
 }
 
@@ -191,11 +191,11 @@ func GetSugar() *zap.SugaredLogger {
 func GetModuleLogger(module string) *zap.Logger {
 	mu.RLock()
 	defer mu.RUnlock()
-	
+
 	if moduleLogger, ok := moduleLoggers[module]; ok {
 		return moduleLogger
 	}
-	
+
 	// 如果模块日志器不存在，返回默认日志器
 	return GetLogger()
 }
@@ -204,7 +204,7 @@ func GetModuleLogger(module string) *zap.Logger {
 func Sync() error {
 	mu.RLock()
 	defer mu.RUnlock()
-	
+
 	if logger != nil {
 		return logger.Sync()
 	}
@@ -349,7 +349,7 @@ func LogDatabaseOperation(operation string, table string, duration time.Duration
 		zap.String("table", table),
 		zap.Duration("duration", duration),
 	}
-	
+
 	if err != nil {
 		fields = append(fields, zap.Error(err))
 		logger.Error("database_operation_failed", fields...)
@@ -367,11 +367,9 @@ func RotateLogs() error {
 
 // SetLevel 动态设置日志级别
 func SetLevel(levelStr string) {
-	level := parseLevel(levelStr)
-	
 	mu.Lock()
 	defer mu.Unlock()
-	
+
 	// 重新创建日志器以应用新的级别
 	cfg := config.Get()
 	if cfg != nil {

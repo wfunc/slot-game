@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wfunc/slot-game/internal/config"
+	"github.com/wfunc/slot-game/internal/database"
 	"github.com/wfunc/slot-game/internal/errors"
 	"github.com/wfunc/slot-game/internal/logger"
 	"go.uber.org/zap"
@@ -80,7 +81,7 @@ func main() {
 	}
 	
 	// 设置系统参数
-	setupSystem(cfg)
+	setupSystem(&cfg.System)
 	
 	// 打印启动信息
 	printStartInfo(cfg)
@@ -153,10 +154,10 @@ func (s *Server) Start() error {
 func (s *Server) initComponents() error {
 	s.logger.Info("初始化组件...")
 	
-	// TODO: 初始化数据库
-	// if err := s.initDatabase(); err != nil {
-	//     return err
-	// }
+	// 初始化数据库
+	if err := s.initDatabase(); err != nil {
+		return err
+	}
 	
 	// TODO: 初始化游戏引擎
 	// if err := s.initGameEngine(); err != nil {
@@ -181,6 +182,32 @@ func (s *Server) initComponents() error {
 	// }
 	
 	s.logger.Info("所有组件初始化完成")
+	return nil
+}
+
+// initDatabase 初始化数据库
+func (s *Server) initDatabase() error {
+	s.logger.Info("初始化数据库...")
+	
+	// 初始化数据库连接
+	if err := database.Init(&s.cfg.Database); err != nil {
+		return errors.Wrap(err, errors.ErrDatabaseConnect, "初始化数据库连接失败")
+	}
+	
+	// 自动迁移数据库
+	if s.cfg.Database.AutoMigrate {
+		s.logger.Info("执行数据库自动迁移...")
+		if err := database.AutoMigrate(); err != nil {
+			return errors.Wrap(err, errors.ErrDatabaseConnect, "数据库迁移失败")
+		}
+	}
+	
+	// 检查数据库连接
+	if !database.IsConnected() {
+		return errors.New(errors.ErrDatabaseConnect, "数据库连接检查失败")
+	}
+	
+	s.logger.Info("数据库初始化完成")
 	return nil
 }
 
@@ -292,12 +319,10 @@ func (s *Server) Shutdown() error {
 func (s *Server) closeComponents() error {
 	s.logger.Info("关闭组件...")
 	
-	// TODO: 关闭数据库连接
-	// if s.database != nil {
-	//     if db, err := s.database.DB(); err == nil {
-	//         db.Close()
-	//     }
-	// }
+	// 关闭数据库连接
+	if err := database.Close(); err != nil {
+		s.logger.Error("关闭数据库失败", zap.Error(err))
+	}
 	
 	// TODO: 关闭串口
 	// if s.serialManager != nil {
