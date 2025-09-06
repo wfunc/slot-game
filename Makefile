@@ -66,15 +66,31 @@ update:
 	$(GO) mod tidy
 	@echo "$(GREEN)依赖更新完成$(NC)"
 
-# 运行测试
+# 运行测试（禁用缓存）
 test:
 	@echo "$(GREEN)运行测试...$(NC)"
-	$(GO) test -v -race -cover ./...
+	$(GO) test -v -race -cover -count=1 ./...
+
+# 运行测试（过滤警告）
+test-quiet:
+	@echo "$(GREEN)运行测试（过滤链接器警告）...$(NC)"
+	@$(GO) test -v -race -cover -count=1 ./... 2>&1 | ( grep -v "ld: warning.*LC_DYSYMTAB" || true )
+
+# 测试仓储层
+test-repo:
+	@echo "$(GREEN)运行仓储层测试...$(NC)"
+	$(GO) test -v -count=1 ./internal/repository/...
+
+# 清理测试缓存
+test-clean:
+	@echo "$(YELLOW)清理测试缓存...$(NC)"
+	$(GO) clean -testcache
+	@echo "$(GREEN)测试缓存已清理$(NC)"
 
 # 测试覆盖率
 coverage:
 	@echo "$(GREEN)生成测试覆盖率报告...$(NC)"
-	$(GO) test -v -race -coverprofile=coverage.out ./...
+	$(GO) test -v -race -coverprofile=coverage.out -count=1 ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "$(GREEN)覆盖率报告: coverage.html$(NC)"
 
@@ -169,7 +185,9 @@ help:
 	@echo "  $(GREEN)build$(NC)        - 构建项目"
 	@echo "  $(GREEN)run$(NC)          - 构建并运行项目"
 	@echo "  $(GREEN)dev$(NC)          - 开发模式运行"
-	@echo "  $(GREEN)test$(NC)         - 运行测试"
+	@echo "  $(GREEN)test$(NC)         - 运行所有测试（禁用缓存）"
+	@echo "  $(GREEN)test-repo$(NC)    - 运行仓储层测试"
+	@echo "  $(GREEN)test-clean$(NC)   - 清理测试缓存"
 	@echo "  $(GREEN)coverage$(NC)     - 生成测试覆盖率报告"
 	@echo "  $(GREEN)deps$(NC)         - 安装依赖"
 	@echo "  $(GREEN)update$(NC)       - 更新依赖"
