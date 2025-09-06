@@ -1,0 +1,130 @@
+# 二进制文件
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+slot-game-server
+
+# 测试二进制文件
+*.test
+
+# Go编译输出
+*.out
+
+# 依赖目录 (Go modules)
+vendor/
+
+# Go工作区文件
+go.work
+
+# 数据库文件
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+
+# 日志文件
+logs/
+*.log
+*.log.*
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE 配置
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.iml
+
+# 调试文件
+debug
+debug.test
+*.prof
+*.pprof
+
+# 环境配置文件（包含敏感信息）
+.env
+.env.local
+.env.*.local
+config/config.local.yaml
+config/config.prod.yaml
+config/*.secret.*
+
+# 测试覆盖率
+*.coverprofile
+coverage.txt
+coverage.html
+coverage/
+
+# 构建缓存
+.cache/
+dist/
+
+# 备份文件
+*.bak
+*.backup
+backup/
+
+# 上传文件目录
+uploads/
+static/uploads/
+
+# 会话文件
+sessions/
+
+# 证书和密钥（安全考虑）
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+certs/
+ssl/
+
+# Go sum 备份
+go.sum.backup
+
+# 文档生成目录
+docs/_build/
+docs/api/
+
+# 性能分析文件
+*.bench
+*.mem
+
+# 系统文件
+.directory
+.Trash-*
+.nfs*
+
+# 包管理器
+node_modules/
+package-lock.json
+yarn.lock
+
+# 其他
+*.pid
+*.seed
+*.pid.lock
+
+# 自定义忽略
+/custom/
+/private/
+
+# claudedocs 目录（如果不想提交Claude生成的文档）
+# claudedocs/
