@@ -210,7 +210,11 @@ func (r *pusherSessionRepo) FindByID(ctx context.Context, id uint) (*models.Push
 // FindBySessionID 根据会话ID查找
 func (r *pusherSessionRepo) FindBySessionID(ctx context.Context, sessionID string) (*models.PusherSession, error) {
 	var session models.PusherSession
-	err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).First(&session).Error
+	// First try to find by GameSession.SessionID string
+	err := r.db.WithContext(ctx).Model(&models.PusherSession{}).
+		Joins("JOIN game_sessions ON pusher_sessions.session_id = game_sessions.id").
+		Where("game_sessions.session_id = ?", sessionID).
+		First(&session).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("会话不存在")

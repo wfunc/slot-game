@@ -217,7 +217,9 @@ func (r *slotSpinRepo) FindBySessionID(ctx context.Context, sessionID uint, pagi
 // FindByUserID 根据用户ID查找
 func (r *slotSpinRepo) FindByUserID(ctx context.Context, userID uint, pagination *Pagination) ([]*models.SlotSpin, error) {
 	var spins []*models.SlotSpin
-	query := r.db.WithContext(ctx).Model(&models.SlotSpin{}).Where("user_id = ?", userID)
+	query := r.db.WithContext(ctx).Model(&models.SlotSpin{}).
+		Joins("JOIN game_results ON slot_spins.result_id = game_results.id").
+		Where("game_results.user_id = ?", userID)
 	
 	// 获取总数
 	var total int64
@@ -228,7 +230,7 @@ func (r *slotSpinRepo) FindByUserID(ctx context.Context, userID uint, pagination
 	err := query.
 		Limit(pagination.PageSize).
 		Offset((pagination.Page - 1) * pagination.PageSize).
-		Order("created_at DESC").
+		Order("slot_spins.created_at DESC").
 		Find(&spins).Error
 	
 	return spins, err
@@ -275,12 +277,13 @@ func (r *slotSpinRepo) GetStatistics(ctx context.Context, machineID uint, start,
 		MinWin      int64
 	}
 	
-	query.Select(`
-		COUNT(*) as total_spins,
-		COALESCE(SUM(bet_amount), 0) as total_bet,
-		COALESCE(SUM(payout), 0) as total_payout,
-		COALESCE(MAX(payout), 0) as max_win,
-		COALESCE(MIN(CASE WHEN payout > 0 THEN payout END), 0) as min_win
+	query.Joins("JOIN game_results ON slot_spins.result_id = game_results.id").
+		Select(`
+		COUNT(DISTINCT slot_spins.id) as total_spins,
+		COALESCE(SUM(game_results.bet_amount), 0) as total_bet,
+		COALESCE(SUM(game_results.win_amount), 0) as total_payout,
+		COALESCE(MAX(game_results.win_amount), 0) as max_win,
+		COALESCE(MIN(CASE WHEN game_results.win_amount > 0 THEN game_results.win_amount END), 0) as min_win
 	`).Scan(&result)
 	
 	stats.TotalSpins = result.TotalSpins
@@ -300,7 +303,15 @@ func (r *slotSpinRepo) GetStatistics(ctx context.Context, machineID uint, start,
 	
 	// 统计输赢次数
 	var winCount int64
-	query.Where("payout > 0").Count(&winCount)
+	winQuery := r.db.WithContext(ctx).Model(&models.SlotSpin{}).
+		Joins("JOIN game_results ON slot_spins.result_id = game_results.id")
+	if machineID > 0 {
+		winQuery = winQuery.Where("slot_spins.machine_id = ?", machineID)
+	}
+	if !start.IsZero() && !end.IsZero() {
+		winQuery = winQuery.Where("slot_spins.created_at BETWEEN ? AND ?", start, end)
+	}
+	winQuery.Where("game_results.win_amount > 0").Count(&winCount)
 	stats.WinCount = int(winCount)
 	stats.LossCount = stats.TotalSpins - stats.WinCount
 	
