@@ -1,0 +1,506 @@
+[
+  1,
+  [
+    "87ew1urOFKPKiwdS36MJnS",
+    "49XgO29uBASJ8F2UqKX/sO",
+    "e3SV/Me5pFp5QBkGlx9RGo",
+    "7btmMcOstGV4YctlytibFA",
+    "69f4+5hxNEH4U5Rbk1xzbB",
+    "70vpG95dZBMKaoQO2WCZLf",
+    "edL3cHWFRGcIclgYye5GUZ",
+    "c02G31jAhGTKLOqelUv8+1",
+    "a1ONyPFDREkYK++3IgL1HA",
+    "1eMTQtU8hM2Iwo2M9TSaLw",
+    "b3mcIEiadHboILhb6oX7f6",
+    "328JpHvDtO9KtSEKfqSnfd"
+  ],
+  [
+    "_textureSetter"
+  ],
+  [
+    "cc.SpriteFrame"
+  ],
+  0,
+  [
+    [
+      [
+        {
+          "name": "zoo_num_pur_11",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_2",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_0",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_8",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_9",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        4
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_6",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        5
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_5",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        6
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_7",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        7
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_3",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        8
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_10",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        9
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_1",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        10
+      ]
+    ],
+    [
+      [
+        {
+          "name": "zoo_num_pur_4",
+          "rect": [
+            0,
+            0,
+            46,
+            60
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "originalSize": [
+            46,
+            60
+          ],
+          "capInsets": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      [
+        0
+      ],
+      0,
+      [
+        0
+      ],
+      [
+        0
+      ],
+      [
+        11
+      ]
+    ]
+  ]
+]

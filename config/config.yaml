@@ -12,6 +12,10 @@ server:
 
 # 数据库配置
 database:
+  # 适配器类型: "standalone" (单机版) 或 "online" (线上版)
+  adapter_type: "standalone"
+  
+  # 原有配置（用于兼容）
   driver: "sqlite"
   dsn: "./data/slot-game.db"
   max_idle_conns: 10
@@ -19,6 +23,27 @@ database:
   conn_max_lifetime: 1h
   log_level: "info" # silent, error, warn, info
   auto_migrate: true
+  
+  # 单机版配置（SQLite）
+  standalone:
+    path: "./data/slot-game.db"
+  
+  # 线上版配置（PostgreSQL + Redis）- 暂未启用
+  online:
+    postgresql:
+      host: "localhost"
+      port: 5432
+      user: "slot_game"
+      password: "password"
+      database: "slot_game_db"
+      ssl_mode: "disable"
+      max_conns: 25
+    redis:
+      host: "localhost"
+      port: 6379
+      password: ""
+      db: 0
+      pool_size: 10
 
 # WebSocket配置
 # 注意：当前WebSocket通过主HTTP服务器提供（端口8080的/ws路径）

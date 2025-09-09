@@ -1,0 +1,52 @@
+[
+  1,
+  [
+    "1efbf2434"
+  ],
+  [
+    "_textureSetter"
+  ],
+  [
+    "cc.SpriteFrame"
+  ],
+  0,
+  [
+    {
+      "name": "zoo_animal_10_1",
+      "rect": [
+        335,
+        275,
+        266,
+        326
+      ],
+      "offset": [
+        0,
+        0
+      ],
+      "originalSize": [
+        266,
+        326
+      ],
+      "rotated": 1,
+      "capInsets": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  [
+    0
+  ],
+  0,
+  [
+    0
+  ],
+  [
+    0
+  ],
+  [
+    0
+  ]
+]

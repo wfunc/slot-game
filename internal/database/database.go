@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/wfunc/slot-game/internal/config"
@@ -34,6 +36,10 @@ func Init(cfg *config.DatabaseConfig) error {
 	case "postgres", "postgresql":
 		dialector = postgres.Open(cfg.DSN)
 	case "sqlite", "sqlite3":
+		// SQLite模式下，自动创建数据目录
+		if err := ensureSQLiteDir(cfg.DSN); err != nil {
+			return fmt.Errorf("创建SQLite数据目录失败: %w", err)
+		}
 		dialector = sqlite.Open(cfg.DSN)
 	default:
 		return fmt.Errorf("不支持的数据库驱动: %s", cfg.Driver)
@@ -203,4 +209,26 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 			zap.Int64("rows", rows),
 		)
 	}
+}
+
+// ensureSQLiteDir 确保SQLite数据文件目录存在
+func ensureSQLiteDir(dsn string) error {
+	// 获取数据文件的目录路径
+	dir := filepath.Dir(dsn)
+	
+	// 如果是内存数据库，直接返回
+	if dsn == ":memory:" || dir == "." || dir == "" {
+		return nil
+	}
+	
+	// 检查目录是否存在
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		// 创建目录（包括父目录）
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("创建目录 %s 失败: %w", dir, err)
+		}
+		logger.Info("创建SQLite数据目录", zap.String("path", dir))
+	}
+	
+	return nil
 }

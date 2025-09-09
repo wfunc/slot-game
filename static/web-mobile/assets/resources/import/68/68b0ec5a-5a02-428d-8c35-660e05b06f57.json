@@ -1,0 +1,51 @@
+[
+  1,
+  [
+    "155cbaa3f"
+  ],
+  [
+    "_textureSetter"
+  ],
+  [
+    "cc.SpriteFrame"
+  ],
+  0,
+  [
+    {
+      "name": "white_loading",
+      "rect": [
+        455,
+        286,
+        149,
+        149
+      ],
+      "offset": [
+        0,
+        0
+      ],
+      "originalSize": [
+        149,
+        149
+      ],
+      "capInsets": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  [
+    0
+  ],
+  0,
+  [
+    0
+  ],
+  [
+    0
+  ],
+  [
+    0
+  ]
+]

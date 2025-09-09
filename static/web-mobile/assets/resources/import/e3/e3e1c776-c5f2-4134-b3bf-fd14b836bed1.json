@@ -1,0 +1,52 @@
+[
+  1,
+  [
+    "155cbaa3f"
+  ],
+  [
+    "_textureSetter"
+  ],
+  [
+    "cc.SpriteFrame"
+  ],
+  0,
+  [
+    {
+      "name": "bg_alert",
+      "rect": [
+        163,
+        684,
+        124,
+        136
+      ],
+      "offset": [
+        0,
+        0
+      ],
+      "originalSize": [
+        124,
+        136
+      ],
+      "rotated": 1,
+      "capInsets": [
+        47,
+        54,
+        47,
+        52
+      ]
+    }
+  ],
+  [
+    0
+  ],
+  0,
+  [
+    0
+  ],
+  [
+    0
+  ],
+  [
+    0
+  ]
+]

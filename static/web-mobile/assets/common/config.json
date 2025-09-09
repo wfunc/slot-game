@@ -1,0 +1,26 @@
+{
+    "paths": {
+        "b9BQO6LhNIGY71tNRJSGQV": [
+            "prefab/GameEntry",
+            "cc.Prefab"
+        ],
+        "48q1htmhVNuqZ9sAVbakrv": [
+            "script/proto/proto.d",
+            "cc.TextAsset"
+        ]
+    },
+    "uuids": [
+        "48q1htmhVNuqZ9sAVbakrv",
+        "b9BQO6LhNIGY71tNRJSGQV"
+    ],
+    "scenes": {},
+    "redirect": [],
+    "deps": [],
+    "packs": {},
+    "name": "common",
+    "importBase": "import",
+    "nativeBase": "native",
+    "debug": true,
+    "isZip": false,
+    "encrypted": false
+}

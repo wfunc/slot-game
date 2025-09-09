@@ -74,6 +74,8 @@ coverage/
 # 构建缓存
 .cache/
 dist/
+release/
+build/
 
 # 备份文件
 *.bak

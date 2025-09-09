@@ -125,6 +125,24 @@ init:
 	fi
 	@echo "$(GREEN)初始化完成$(NC)"
 
+# 构建ARM64版本（用于Ubuntu ARM64）
+build-arm64:
+	@echo "$(GREEN)构建ARM64版本...$(NC)"
+	@chmod +x scripts/build-arm64.sh
+	@bash scripts/build-arm64.sh
+	@echo "$(GREEN)ARM64版本构建完成$(NC)"
+
+# 构建Linux AMD64版本
+build-linux:
+	@echo "$(GREEN)构建Linux AMD64版本...$(NC)"
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 $(MAIN_PATH)
+	@echo "$(GREEN)Linux AMD64版本构建完成: $(BIN_DIR)/$(APP_NAME)-linux-amd64$(NC)"
+
+# 构建所有平台版本
+build-all: build build-linux build-arm64
+	@echo "$(GREEN)所有平台版本构建完成$(NC)"
+
 # Docker构建
 docker-build:
 	@echo "$(GREEN)构建Docker镜像...$(NC)"
@@ -182,7 +200,10 @@ help:
 	@echo "  make [目标]"
 	@echo ""
 	@echo "$(YELLOW)可用目标:$(NC)"
-	@echo "  $(GREEN)build$(NC)        - 构建项目"
+	@echo "  $(GREEN)build$(NC)        - 构建项目（当前平台）"
+	@echo "  $(GREEN)build-arm64$(NC)  - 构建ARM64版本（Ubuntu ARM64）"
+	@echo "  $(GREEN)build-linux$(NC)  - 构建Linux AMD64版本"
+	@echo "  $(GREEN)build-all$(NC)    - 构建所有平台版本"
 	@echo "  $(GREEN)run$(NC)          - 构建并运行项目"
 	@echo "  $(GREEN)dev$(NC)          - 开发模式运行"
 	@echo "  $(GREEN)test$(NC)         - 运行所有测试（禁用缓存）"
