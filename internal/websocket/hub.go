@@ -9,6 +9,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// MessageHandlerInterface 消息处理器接口
+type MessageHandlerInterface interface {
+	HandleClientMessage(client *Client, data []byte)
+}
+
 // Hub WebSocket连接管理中心
 type Hub struct {
 	// 客户端连接池
@@ -25,6 +30,9 @@ type Hub struct {
 	// 注册/注销通道
 	register   chan *Client
 	unregister chan *Client
+
+	// 消息处理器接口
+	messageHandler MessageHandlerInterface
 
 	// 日志
 	logger *zap.Logger
@@ -57,6 +65,9 @@ const (
 	MessageTypePing         = "ping"
 	MessageTypePong         = "pong"
 	MessageTypeError        = "error"
+	MessageTypeHeartbeat    = "heartbeat"    // 心跳
+	MessageTypeSubscribe    = "subscribe"    // 订阅频道
+	MessageTypeUnsubscribe  = "unsubscribe"  // 取消订阅
 
 	// 游戏消息
 	MessageTypeGameStart    = "game_start"
@@ -64,6 +75,8 @@ const (
 	MessageTypeGameResult   = "game_result"
 	MessageTypeGameSettle   = "game_settle"
 	MessageTypeGameState    = "game_state"
+	MessageTypeGetBalance   = "get_balance"  // 获取余额
+	MessageTypeGetStatus    = "get_status"   // 获取状态
 
 	// 钱包消息
 	MessageTypeBalanceUpdate = "balance_update"
@@ -306,4 +319,14 @@ func (h *Hub) Register(client *Client) {
 // Unregister 注销客户端（公开方法）
 func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
+}
+
+// SetMessageHandler 设置消息处理器
+func (h *Hub) SetMessageHandler(handler MessageHandlerInterface) {
+	h.messageHandler = handler
+}
+
+// GetMessageHandler 获取消息处理器
+func (h *Hub) GetMessageHandler() MessageHandlerInterface {
+	return h.messageHandler
 }

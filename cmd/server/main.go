@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -11,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wfunc/slot-game/internal/api"
 	"github.com/wfunc/slot-game/internal/config"
 	"github.com/wfunc/slot-game/internal/database"
 	"github.com/wfunc/slot-game/internal/errors"
 	"github.com/wfunc/slot-game/internal/logger"
+	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +33,9 @@ type Server struct {
 	cfg      *config.Config
 	logger   *zap.Logger
 	
-	// 服务组件（后续实现）
+	// 服务组件
+	router       *api.Router
+	httpServer   *http.Server
 	// gameEngine    *game.Engine
 	// wsServer      *websocket.Server
 	// serialManager *hardware.SerialManager
@@ -144,7 +149,7 @@ func (s *Server) Start() error {
 	
 	s.logger.Info("服务器启动成功",
 		zap.String("http", fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)),
-		zap.String("websocket", fmt.Sprintf("%s:%d", s.cfg.WebSocket.Host, s.cfg.WebSocket.Port)),
+		zap.String("websocket", fmt.Sprintf("ws://%s:%d/ws/game", s.cfg.Server.Host, s.cfg.Server.Port)),
 	)
 	
 	return nil
@@ -159,6 +164,11 @@ func (s *Server) initComponents() error {
 		return err
 	}
 	
+	// 初始化HTTP路由
+	if err := s.initHTTPRouter(); err != nil {
+		return err
+	}
+	
 	// TODO: 初始化游戏引擎
 	// if err := s.initGameEngine(); err != nil {
 	//     return err
@@ -166,11 +176,6 @@ func (s *Server) initComponents() error {
 	
 	// TODO: 初始化串口管理器
 	// if err := s.initSerialManager(); err != nil {
-	//     return err
-	// }
-	
-	// TODO: 初始化WebSocket服务器
-	// if err := s.initWebSocketServer(); err != nil {
 	//     return err
 	// }
 	
@@ -211,13 +216,45 @@ func (s *Server) initDatabase() error {
 	return nil
 }
 
+// initHTTPRouter 初始化HTTP路由
+func (s *Server) initHTTPRouter() error {
+	s.logger.Info("初始化HTTP路由...")
+	
+	// 获取数据库连接
+	db := database.GetDB()
+	if db == nil {
+		return errors.New(errors.ErrDatabaseConnect, "数据库连接不可用")
+	}
+	
+	// 创建服务配置
+	serviceConfig := &service.Config{
+		JWTSecret:          s.cfg.Security.JWT.Secret,
+		AccessTokenExpiry:  time.Duration(s.cfg.Security.JWT.ExpireHours) * time.Hour,
+		RefreshTokenExpiry: time.Duration(s.cfg.Security.JWT.RefreshHours) * time.Hour,
+	}
+	
+	// 创建路由器
+	s.router = api.NewRouter(db, serviceConfig, s.logger)
+	
+	// 创建HTTP服务器
+	s.httpServer = &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port),
+		Handler:      s.router.GetEngine(),
+		ReadTimeout:  s.cfg.Server.ReadTimeout,
+		WriteTimeout: s.cfg.Server.WriteTimeout,
+	}
+	
+	s.logger.Info("HTTP路由初始化完成")
+	return nil
+}
+
 // startServices 启动服务
 func (s *Server) startServices() error {
 	s.logger.Info("启动服务...")
 	
-	// TODO: 启动HTTP服务器
-	// s.wg.Add(1)
-	// go s.startHTTPServer()
+	// 启动HTTP服务器
+	s.wg.Add(1)
+	go s.startHTTPServer()
 	
 	// TODO: 启动WebSocket服务器
 	// s.wg.Add(1)
@@ -238,14 +275,6 @@ func (s *Server) startServices() error {
 	//     s.wg.Add(1)
 	//     go s.startMonitor()
 	// }
-	
-	// 模拟服务启动（临时代码）
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		<-s.ctx.Done()
-		s.logger.Info("模拟服务已停止")
-	}()
 	
 	s.logger.Info("所有服务启动完成")
 	return nil
@@ -341,6 +370,35 @@ func (s *Server) closeComponents() error {
 	
 	s.logger.Info("所有组件已关闭")
 	return nil
+}
+
+// startHTTPServer 启动HTTP服务器
+func (s *Server) startHTTPServer() {
+	defer s.wg.Done()
+	
+	s.logger.Info("启动HTTP服务器",
+		zap.String("address", s.httpServer.Addr),
+	)
+	
+	// 启动服务器
+	go func() {
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.logger.Fatal("HTTP服务器启动失败", zap.Error(err))
+		}
+	}()
+	
+	// 等待关闭信号
+	<-s.ctx.Done()
+	
+	// 优雅关闭HTTP服务器
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+		s.logger.Error("HTTP服务器关闭失败", zap.Error(err))
+	}
+	
+	s.logger.Info("HTTP服务器已关闭")
 }
 
 // reloadConfig 重新加载配置

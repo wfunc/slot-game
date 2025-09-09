@@ -121,12 +121,31 @@ func (c *Client) WritePump() {
 
 // handleMessage 处理接收到的消息
 func (c *Client) handleMessage(data []byte) {
+	// 如果Hub有消息处理器，使用处理器
+	if c.Hub.messageHandler != nil {
+		c.Hub.messageHandler.HandleClientMessage(c, data)
+		return
+	}
+
+	// 否则使用默认处理
 	var msg Message
 	if err := json.Unmarshal(data, &msg); err != nil {
 		c.Hub.logger.Error("解析WebSocket消息失败",
 			zap.String("client_id", c.ID),
 			zap.Error(err))
 		c.sendError("消息格式错误")
+		// 断开发送无效JSON的连接
+		c.Close()
+		return
+	}
+	
+	// 验证消息类型不为空
+	if msg.Type == "" {
+		c.Hub.logger.Warn("收到空消息类型",
+			zap.String("client_id", c.ID))
+		c.sendError("消息类型不能为空")
+		// 断开连接
+		c.Close()
 		return
 	}
 
@@ -148,10 +167,13 @@ func (c *Client) handleMessage(data []byte) {
 		}
 
 	default:
-		// 其他消息类型，可以转发或处理
-		c.Hub.logger.Debug("收到消息",
+		// 不支持的消息类型
+		c.Hub.logger.Warn("收到不支持的消息类型",
 			zap.String("client_id", c.ID),
 			zap.String("type", msg.Type))
+		c.sendError("不支持的消息类型: " + msg.Type)
+		// 断开发送无效消息类型的连接
+		c.Close()
 	}
 }
 

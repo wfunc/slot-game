@@ -51,6 +51,11 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	wsHub := ws.NewHub(log)
 	go wsHub.Run() // 启动Hub
 	
+	// 创建WebSocket消息处理器并设置到Hub
+	// 使用简化版消息处理器，提供基础WebSocket功能
+	simpleHandler := ws.NewSimpleMessageHandler(wsHub, db, log)
+	wsHub.SetMessageHandler(simpleHandler)
+	
 	// 创建处理器
 	authHandler := NewAuthHandler(services.Auth, services.User)
 	wsHandler := NewWebSocketHandler(wsHub, log)

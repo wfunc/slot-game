@@ -21,9 +21,11 @@ database:
   auto_migrate: true
 
 # WebSocket配置
+# 注意：当前WebSocket通过主HTTP服务器提供（端口8080的/ws路径）
+# 下面的独立端口配置暂未使用
 websocket:
   host: "0.0.0.0"
-  port: 8081
+  port: 8081  # 未使用 - WebSocket实际通过 http://localhost:8080/ws/game 访问
   path: "/ws"
   read_buffer_size: 1024
   write_buffer_size: 1024

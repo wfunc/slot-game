@@ -36,11 +36,14 @@ func NewWebSocketHandler(hub *ws.Hub, logger *zap.Logger) *WebSocketHandler {
 
 // GameWebSocket 游戏WebSocket连接
 func (h *WebSocketHandler) GameWebSocket(c *gin.Context) {
-	// 获取用户ID
+	// 获取用户ID（可选）
 	userID, exists := middleware.GetUserID(c)
+	
+	// 如果没有认证，使用访客模式（用于测试）
 	if !exists || userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
-		return
+		// 访客用户ID，使用一个特殊的标识
+		userID = 999999 // 访客用户ID
+		h.logger.Info("WebSocket访客连接", zap.String("ip", c.ClientIP()))
 	}
 
 	// 升级为WebSocket连接
