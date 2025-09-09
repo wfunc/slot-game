@@ -1,6 +1,7 @@
 package slot
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -38,6 +39,7 @@ type SpinResult struct {
 	UserID       uint         `json:"user_id"`       // 用户ID
 	BetAmount    int64        `json:"bet_amount"`    // 下注金额
 	WinAmount    int64        `json:"win_amount"`    // 中奖金额
+	TotalPayout  int64        `json:"total_payout"`  // 总赔付金额
 	Multiplier   float64      `json:"multiplier"`    // 倍率
 	Reels        [][]Symbol   `json:"reels"`         // 卷轴结果
 	WinLines     []WinLine    `json:"win_lines"`     // 中奖线
@@ -46,6 +48,45 @@ type SpinResult struct {
 	IsJackpot    bool         `json:"is_jackpot"`    // 是否中大奖
 	RTP          float64      `json:"rtp"`           // 实际RTP
 	Timestamp    time.Time    `json:"timestamp"`     // 时间戳
+}
+
+// GetTotalPayout 获取总赔付（兼容性方法）
+func (s *SpinResult) GetTotalPayout() int64 {
+	if s.TotalPayout > 0 {
+		return s.TotalPayout
+	}
+	return s.WinAmount
+}
+
+// GetWinDescription 获取中奖描述
+func (s *SpinResult) GetWinDescription() string {
+	if s.IsJackpot {
+		return "Jackpot!"
+	}
+	if len(s.WinLines) > 0 {
+		return fmt.Sprintf("%d条中奖线", len(s.WinLines))
+	}
+	return "未中奖"
+}
+
+// ToJSON 转换为JSON map
+func (s *SpinResult) ToJSON() map[string]interface{} {
+	return map[string]interface{}{
+		"id":           s.ID,
+		"session_id":   s.SessionID,
+		"user_id":      s.UserID,
+		"bet_amount":   s.BetAmount,
+		"win_amount":   s.WinAmount,
+		"total_payout": s.GetTotalPayout(),
+		"multiplier":   s.Multiplier,
+		"reels":        s.Reels,
+		"win_lines":    s.WinLines,
+		"features":     s.Features,
+		"free_spins":   s.FreeSpins,
+		"is_jackpot":   s.IsJackpot,
+		"rtp":          s.RTP,
+		"timestamp":    s.Timestamp,
+	}
 }
 
 // WinLine 中奖线

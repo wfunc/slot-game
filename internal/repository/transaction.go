@@ -280,9 +280,7 @@ func (t *Transaction) GameRoom() GameRoomRepository {
 // Wallet 获取事务中的钱包仓储
 func (t *Transaction) Wallet() WalletRepository {
 	if t.wallet == nil {
-		t.wallet = &walletRepo{
-			BaseRepo: &BaseRepo{db: t.tx},
-		}
+		t.wallet = NewWalletRepository(t.tx)
 	}
 	return t.wallet
 }

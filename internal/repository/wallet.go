@@ -15,11 +15,13 @@ type WalletRepository interface {
 	BaseRepository
 	Create(ctx context.Context, wallet *models.Wallet) error
 	FindByUserID(ctx context.Context, userID uint) (*models.Wallet, error)
+	GetByUserID(ctx context.Context, userID uint) (*models.Wallet, error) // 别名，兼容性
 	UpdateBalance(ctx context.Context, userID uint, amount int64) error
 	AddBalance(ctx context.Context, userID uint, amount int64) error
 	DeductBalance(ctx context.Context, userID uint, amount int64) error
 	LockForUpdate(ctx context.Context, userID uint) (*models.Wallet, error)
 	UpdateStatistics(ctx context.Context, userID uint, field string, amount int64) error
+	CreateTransaction(ctx context.Context, transaction *models.WalletTransaction) error
 }
 
 // walletRepo 钱包仓储实现
@@ -50,6 +52,11 @@ func (r *walletRepo) FindByUserID(ctx context.Context, userID uint) (*models.Wal
 		return nil, err
 	}
 	return &wallet, nil
+}
+
+// GetByUserID 根据用户ID查找钱包（兼容性别名）
+func (r *walletRepo) GetByUserID(ctx context.Context, userID uint) (*models.Wallet, error) {
+	return r.FindByUserID(ctx, userID)
 }
 
 // UpdateBalance 更新余额
@@ -120,6 +127,11 @@ func (r *walletRepo) UpdateStatistics(ctx context.Context, userID uint, field st
 		Model(&models.Wallet{}).
 		Where("user_id = ?", userID).
 		Update(field, gorm.Expr(field+" + ?", amount)).Error
+}
+
+// CreateTransaction 创建交易记录
+func (r *walletRepo) CreateTransaction(ctx context.Context, transaction *models.WalletTransaction) error {
+	return r.db.WithContext(ctx).Create(transaction).Error
 }
 
 // WithTx 使用事务

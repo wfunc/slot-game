@@ -44,6 +44,17 @@ type SessionData struct {
 	LastActiveAt   time.Time
 }
 
+// NewEngine 创建游戏引擎（接口方法）
+func NewEngine(config *SlotConfig) Engine {
+	engine, _ := NewSlotEngine(config)
+	return engine
+}
+
+// DefaultConfig 获取默认配置
+func DefaultConfig() *SlotConfig {
+	return GetDefaultConfig()
+}
+
 // NewSlotEngine 创建老虎机引擎
 func NewSlotEngine(config *SlotConfig) (*SlotEngine, error) {
 	// 验证配置

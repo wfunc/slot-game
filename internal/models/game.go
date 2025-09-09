@@ -60,6 +60,9 @@ type GameSession struct {
 	Room        *GameRoom `gorm:"foreignKey:RoomID" json:"room,omitempty"`
 }
 
+// GameRecord 是 GameResult 的别名，用于兼容性
+type GameRecord = GameResult
+
 // GameResult 游戏结果表
 type GameResult struct {
 	BaseModel

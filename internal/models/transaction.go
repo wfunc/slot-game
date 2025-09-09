@@ -27,6 +27,9 @@ type Wallet struct {
 	// 查询时使用 Preload("User") 来加载用户信息
 }
 
+// WalletTransaction 是 Transaction 的别名，用于兼容性
+type WalletTransaction = Transaction
+
 // Transaction 交易记录表
 type Transaction struct {
 	BaseModel
