@@ -250,10 +250,13 @@
             <h3>快速测试命令</h3>
             <div class="action-buttons">
                 <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'ping'}))">Ping</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'subscribe', channel: 'game'}))">订阅游戏频道</div>
+                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'subscribe', data: {channel: 'game'}}))">订阅游戏频道</div>
                 <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'get_balance'}))">获取余额</div>
                 <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_state'}))">游戏状态</div>
                 <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'heartbeat'}))">心跳</div>
+                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_start', data: {bet_amount: 100}}))">开始游戏</div>
+                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_spin'}))">旋转</div>
+                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_settle'}))">结算游戏</div>
             </div>
         </div>
 

@@ -52,9 +52,9 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	go wsHub.Run() // 启动Hub
 	
 	// 创建WebSocket消息处理器并设置到Hub
-	// 使用简化版消息处理器，提供基础WebSocket功能
-	simpleHandler := ws.NewSimpleMessageHandler(wsHub, db, log)
-	wsHub.SetMessageHandler(simpleHandler)
+	// 使用游戏消息处理器，提供完整的游戏功能
+	gameHandler := ws.NewGameMessageHandler(wsHub, db, gameService, log)
+	wsHub.SetMessageHandler(gameHandler)
 	
 	// 创建处理器
 	authHandler := NewAuthHandler(services.Auth, services.User)
