@@ -17,14 +17,16 @@ import (
 type SlotHandler struct {
 	gameService *game.GameService
 	walletRepo  repository.WalletRepository
+	wsHandler   *WebSocketHandler
 	logger      *zap.Logger
 }
 
 // NewSlotHandler 创建老虎机处理器
-func NewSlotHandler(gameService *game.GameService, walletRepo repository.WalletRepository, logger *zap.Logger) *SlotHandler {
+func NewSlotHandler(gameService *game.GameService, walletRepo repository.WalletRepository, wsHandler *WebSocketHandler, logger *zap.Logger) *SlotHandler {
 	return &SlotHandler{
 		gameService: gameService,
 		walletRepo:  walletRepo,
+		wsHandler:   wsHandler,
 		logger:      logger,
 	}
 }
@@ -137,11 +139,19 @@ func (h *SlotHandler) Start(c *gin.Context) {
 		zap.Int64("bet_amount", req.BetAmount),
 		zap.Int64("balance", wallet.Balance))
 
-	c.JSON(200, StartResponse{
+	response := StartResponse{
 		SessionID: sessionID,
 		Balance:   wallet.Balance,
 		Message:   "游戏已开始，请执行转动",
-	})
+	}
+
+	// 发送WebSocket消息
+	if h.wsHandler != nil {
+		h.wsHandler.SendGameStart(userID, sessionID, response)
+		h.wsHandler.SendBalanceUpdate(userID, wallet.Balance)
+	}
+
+	c.JSON(200, response)
 }
 
 // Spin 执行转动
@@ -179,13 +189,26 @@ func (h *SlotHandler) Spin(c *gin.Context) {
 		zap.String("session_id", req.SessionID),
 		zap.Any("result", result))
 
-	c.JSON(200, SpinResponse{
+	response := SpinResponse{
 		Result:   result.Result,
 		Balance:  wallet.Balance,
 		State:    result.State,
 		TotalBet: result.TotalBet,
 		TotalWin: result.TotalWin,
-	})
+	}
+
+	// 发送WebSocket消息
+	if h.wsHandler != nil {
+		h.wsHandler.SendGameResult(userID, req.SessionID, response)
+		h.wsHandler.SendBalanceUpdate(userID, wallet.Balance)
+		h.wsHandler.SendGameState(req.SessionID, map[string]interface{}{
+			"state":     result.State,
+			"total_bet": result.TotalBet,
+			"total_win": result.TotalWin,
+		})
+	}
+
+	c.JSON(200, response)
 }
 
 // Settle 结算游戏
@@ -324,6 +347,70 @@ func (h *SlotHandler) GetSessionInfo(c *gin.Context) {
 		Duration:    info.Duration,
 		LastResult:  info.LastResult,
 	})
+}
+
+// BatchSpin 批量转动
+func (h *SlotHandler) BatchSpin(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists || userID == 0 {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
+	var req game.BatchSpinRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+
+	// 验证转动次数
+	if req.SpinCount < 1 || req.SpinCount > 100 {
+		c.JSON(400, gin.H{"error": "转动次数必须在1-100之间"})
+		return
+	}
+
+	// 执行批量转动
+	result, err := h.gameService.BatchSpin(c.Request.Context(), &req)
+	if err != nil {
+		h.logger.Error("批量转动失败",
+			zap.String("session_id", req.SessionID),
+			zap.Int("spin_count", req.SpinCount),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 获取当前余额
+	wallet, err := h.walletRepo.GetByUserID(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("获取钱包失败", zap.Error(err))
+	}
+
+	h.logger.Info("批量转动完成",
+		zap.String("session_id", req.SessionID),
+		zap.Int("total_spins", result.TotalSpins),
+		zap.Int64("total_win", result.TotalWin))
+
+	// 发送WebSocket批量结果通知
+	if h.wsHandler != nil {
+		// 发送批量转动结果
+		h.wsHandler.SendGameResult(userID, req.SessionID, result)
+		// 更新余额
+		if wallet != nil {
+			h.wsHandler.SendBalanceUpdate(userID, wallet.Balance)
+		}
+		// 更新游戏状态
+		h.wsHandler.SendGameState(req.SessionID, map[string]interface{}{
+			"state":         result.State,
+			"total_bet":     result.TotalBet,
+			"total_win":     result.TotalWin,
+			"total_spins":   result.TotalSpins,
+			"stopped_early": result.StoppedEarly,
+			"stop_reason":   result.StopReason,
+		})
+	}
+
+	c.JSON(200, result)
 }
 
 // GetUserStats 获取用户统计

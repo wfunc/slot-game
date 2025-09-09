@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wfunc/slot-game/internal/game/slot"
 	"github.com/wfunc/slot-game/internal/models"
 	"github.com/wfunc/slot-game/internal/repository"
 	"go.uber.org/zap"
@@ -280,6 +281,106 @@ func (s *GameService) GetUserGameHistory(ctx context.Context, userID uint, limit
 		PageSize: limit,
 	}
 	return s.gameResultRepo.FindWinsByUserID(ctx, userID, pagination)
+}
+
+// BatchSpin 批量转动
+func (s *GameService) BatchSpin(ctx context.Context, req *BatchSpinRequest) (*BatchSpinResponse, error) {
+	// 获取会话
+	session, err := s.sessionManager.GetSession(req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("会话不存在: %w", err)
+	}
+	
+	// 验证游戏状态
+	if session.GetState() != StateSpinning {
+		return nil, errors.New("游戏状态不允许转动")
+	}
+	
+	// 获取用户钱包
+	wallet, err := s.walletRepo.GetByUserID(ctx, session.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("获取钱包失败: %w", err)
+	}
+	
+	// 获取投注金额
+	betAmount := session.StateMachine.GetBetAmount()
+	
+	// 检查余额是否足够批量转动
+	totalBetNeeded := betAmount * int64(req.SpinCount)
+	if wallet.Balance < totalBetNeeded {
+		// 计算实际可以转动的次数
+		maxSpins := int(wallet.Balance / betAmount)
+		if maxSpins == 0 {
+			return nil, errors.New("余额不足")
+		}
+		req.SpinCount = maxSpins
+	}
+	
+	// 初始化响应
+	response := &BatchSpinResponse{
+		SessionID:    req.SessionID,
+		SpinResults:  make([]*slot.SpinResult, 0, req.SpinCount),
+		TotalSpins:   0,
+		TotalBet:     0,
+		TotalWin:     0,
+		StoppedEarly: false,
+		FinalBalance: wallet.Balance,
+	}
+	
+	// 执行批量转动
+	for i := 0; i < req.SpinCount; i++ {
+		// 执行单次转动
+		spinResp, err := s.Spin(ctx, req.SessionID)
+		if err != nil {
+			s.logger.Error("批量转动中发生错误",
+				zap.String("session_id", req.SessionID),
+				zap.Int("spin_index", i),
+				zap.Error(err))
+			break
+		}
+		
+		// 添加结果
+		response.SpinResults = append(response.SpinResults, spinResp.Result)
+		response.TotalSpins++
+		response.TotalBet += betAmount
+		response.TotalWin += spinResp.Result.TotalPayout
+		
+		// 检查是否需要提前停止
+		if req.AutoStop && spinResp.Result.TotalPayout > 0 {
+			response.StoppedEarly = true
+			response.StopReason = "中奖自动停止"
+			break
+		}
+		
+		if req.StopOnBigWin && spinResp.Result.TotalPayout >= req.BigWinAmount {
+			response.StoppedEarly = true
+			response.StopReason = fmt.Sprintf("达到大奖金额 %d", req.BigWinAmount)
+			break
+		}
+		
+		// 获取最新余额
+		wallet, _ = s.walletRepo.GetByUserID(ctx, session.UserID)
+		response.FinalBalance = wallet.Balance
+		
+		// 检查余额是否足够继续
+		if wallet.Balance < betAmount {
+			response.StoppedEarly = true
+			response.StopReason = "余额不足"
+			break
+		}
+	}
+	
+	// 设置最终状态
+	response.State = string(session.GetState())
+	
+	s.logger.Info("批量转动完成",
+		zap.String("session_id", req.SessionID),
+		zap.Int("total_spins", response.TotalSpins),
+		zap.Int64("total_bet", response.TotalBet),
+		zap.Int64("total_win", response.TotalWin),
+		zap.Bool("stopped_early", response.StoppedEarly))
+	
+	return response, nil
 }
 
 // GetUserStats 获取用户统计

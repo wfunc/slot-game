@@ -6,6 +6,7 @@ import (
 	"github.com/wfunc/slot-game/internal/middleware"
 	"github.com/wfunc/slot-game/internal/repository"
 	"github.com/wfunc/slot-game/internal/service"
+	ws "github.com/wfunc/slot-game/internal/websocket"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"time"
@@ -19,6 +20,8 @@ type Router struct {
 	authHandler    *AuthHandler
 	slotHandler    *SlotHandler
 	walletHandler  *WalletHandler
+	wsHandler      *WebSocketHandler
+	wsHub          *ws.Hub
 	authMiddleware *middleware.AuthMiddleware
 	log            *zap.Logger
 }
@@ -44,9 +47,14 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	}
 	gameService := game.NewGameService(gameServiceConfig)
 	
+	// 创建WebSocket Hub
+	wsHub := ws.NewHub(log)
+	go wsHub.Run() // 启动Hub
+	
 	// 创建处理器
 	authHandler := NewAuthHandler(services.Auth, services.User)
-	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), log)
+	wsHandler := NewWebSocketHandler(wsHub, log)
+	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), wsHandler, log)
 	walletHandler := NewWalletHandler(db, log)
 	
 	// 创建中间件
@@ -59,6 +67,8 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 		authHandler:    authHandler,
 		slotHandler:    slotHandler,
 		walletHandler:  walletHandler,
+		wsHandler:      wsHandler,
+		wsHub:          wsHub,
 		authMiddleware: authMiddleware,
 		log:            log,
 	}
@@ -122,6 +132,7 @@ func (r *Router) setupRoutes() {
 		{
 			slot.POST("/start", r.slotHandler.Start)        // 开始游戏
 			slot.POST("/spin", r.slotHandler.Spin)          // 执行转动
+			slot.POST("/batch-spin", r.slotHandler.BatchSpin) // 批量转动
 			slot.POST("/settle", r.slotHandler.Settle)      // 结算游戏
 			slot.GET("/history", r.slotHandler.GetHistory)  // 游戏历史
 			slot.GET("/session/:id", r.slotHandler.GetSessionInfo) // 会话信息
@@ -163,11 +174,10 @@ func (r *Router) setupRoutes() {
 	
 	// WebSocket路由
 	ws := r.engine.Group("/ws")
-	ws.Use(r.authMiddleware.RequireAuth())
+	// WebSocket使用JWT认证，但不需要通过中间件
 	{
-		// TODO: 实现WebSocket
-		// ws.GET("/game", r.wsHandler.GameWebSocket)
-		// ws.GET("/chat", r.wsHandler.ChatWebSocket)
+		ws.GET("/game", r.authMiddleware.OptionalAuth(), r.wsHandler.GameWebSocket)
+		ws.GET("/online", r.wsHandler.GetOnlineCount)
 	}
 	
 	// 静态文件服务

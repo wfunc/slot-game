@@ -304,6 +304,13 @@ func (sm *StateMachine) SetBetAmount(amount int64) {
 	sm.betAmount = amount
 }
 
+// GetBetAmount 获取投注金额
+func (sm *StateMachine) GetBetAmount() int64 {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.betAmount
+}
+
 // SetWinAmount 设置中奖金额
 func (sm *StateMachine) SetWinAmount(amount int64) {
 	sm.mu.Lock()
