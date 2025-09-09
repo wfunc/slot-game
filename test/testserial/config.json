@@ -1,0 +1,33 @@
+{
+  "acm_port": {
+    "device": "auto",
+    "device_pattern": "ACM",
+    "baud_rate": 115200,
+    "data_bits": 8,
+    "stop_bits": 2,
+    "parity": "none",
+    "timeout_ms": 1000,
+    "description": "ACM设备串口 - 自动检测包含ACM的设备路径"
+  },
+  "stm32_port": {
+    "device": "/dev/ttyS3",
+    "baud_rate": 115200,
+    "data_bits": 8,
+    "stop_bits": 2,
+    "parity": "none",
+    "timeout_ms": 1000,
+    "description": "STM32芯片串口 - 用于读取加密芯片数据和游戏算法"
+  },
+  "message_types": {
+    "M1": "基础消息",
+    "M2": "响应消息(code, function)",
+    "M3": "状态消息(state)",
+    "M4": "控制消息(action: wait/exit/start/fail)",
+    "M5": "更新状态消息(upstate)",
+    "M6": "MQTT消息(toptype: 0/1/2)"
+  },
+  "test_mode": true,
+  "log_level": "debug",
+  "auto_reconnect": true,
+  "reconnect_interval_ms": 5000
+}
