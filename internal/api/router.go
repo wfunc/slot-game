@@ -2,20 +2,25 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/wfunc/slot-game/internal/game"
 	"github.com/wfunc/slot-game/internal/middleware"
+	"github.com/wfunc/slot-game/internal/repository"
 	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"time"
 )
 
 // Router API路由器
 type Router struct {
-	engine      *gin.Engine
-	db          *gorm.DB
-	services    *service.Services
-	authHandler *AuthHandler
+	engine         *gin.Engine
+	db             *gorm.DB
+	services       *service.Services
+	authHandler    *AuthHandler
+	slotHandler    *SlotHandler
+	walletHandler  *WalletHandler
 	authMiddleware *middleware.AuthMiddleware
-	log         *zap.Logger
+	log            *zap.Logger
 }
 
 // NewRouter 创建路由器
@@ -30,8 +35,19 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	// 创建服务
 	services := service.NewServices(db, config, log)
 	
+	// 创建游戏服务
+	gameServiceConfig := &game.GameServiceConfig{
+		DB:             db,
+		Logger:         log,
+		SessionTimeout: 30 * time.Minute,
+		MaxSessions:    1000,
+	}
+	gameService := game.NewGameService(gameServiceConfig)
+	
 	// 创建处理器
 	authHandler := NewAuthHandler(services.Auth, services.User)
+	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), log)
+	walletHandler := NewWalletHandler(db, log)
 	
 	// 创建中间件
 	authMiddleware := middleware.NewAuthMiddleware(services.Auth)
@@ -41,6 +57,8 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 		db:             db,
 		services:       services,
 		authHandler:    authHandler,
+		slotHandler:    slotHandler,
+		walletHandler:  walletHandler,
 		authMiddleware: authMiddleware,
 		log:            log,
 	}
@@ -102,10 +120,12 @@ func (r *Router) setupRoutes() {
 		slot := v1.Group("/slot")
 		slot.Use(r.authMiddleware.RequireAuth())
 		{
-			// TODO: 实现老虎机API
-			// slot.GET("/machines", r.slotHandler.GetMachines)
-			// slot.POST("/spin", r.slotHandler.Spin)
-			// slot.GET("/history", r.slotHandler.GetHistory)
+			slot.POST("/start", r.slotHandler.Start)        // 开始游戏
+			slot.POST("/spin", r.slotHandler.Spin)          // 执行转动
+			slot.POST("/settle", r.slotHandler.Settle)      // 结算游戏
+			slot.GET("/history", r.slotHandler.GetHistory)  // 游戏历史
+			slot.GET("/session/:id", r.slotHandler.GetSessionInfo) // 会话信息
+			slot.GET("/stats", r.slotHandler.GetUserStats)  // 用户统计
 		}
 		
 		// 推币机游戏路由
@@ -122,11 +142,11 @@ func (r *Router) setupRoutes() {
 		wallet := v1.Group("/wallet")
 		wallet.Use(r.authMiddleware.RequireAuth())
 		{
-			// TODO: 实现钱包API
-			// wallet.GET("/balance", r.walletHandler.GetBalance)
-			// wallet.POST("/deposit", r.walletHandler.Deposit)
-			// wallet.POST("/withdraw", r.walletHandler.Withdraw)
-			// wallet.GET("/transactions", r.walletHandler.GetTransactions)
+			wallet.GET("/balance", r.walletHandler.GetBalance)           // 查询余额
+			wallet.POST("/deposit", r.walletHandler.Deposit)             // 充值（测试）
+			wallet.POST("/withdraw", r.walletHandler.Withdraw)           // 提现（模拟）
+			wallet.GET("/transactions", r.walletHandler.GetTransactions) // 交易记录
+			wallet.GET("/statistics", r.walletHandler.GetStatistics)     // 钱包统计
 		}
 		
 		// 管理员路由（需要管理员权限）
