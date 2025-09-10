@@ -102,9 +102,22 @@ ssl/
 # Go sum 备份
 go.sum.backup
 
-# 文档生成目录
+# 文档生成目录（由 swag 生成）
 docs/_build/
-docs/api/
+docs/swagger/
+
+# 保留手工维护的 OpenAPI 文件
+!docs/api/openapi.yaml
+
+# Go 本地构建缓存（避免沙箱/权限问题）
+.gocache/
+.gotmp/
+
+# 可选下载的前端文档资源（离线渲染）
+static/vendors/redoc/redoc.standalone.js
+static/vendors/swagger-ui/*
+!static/vendors/swagger-ui/README.md
+!static/vendors/redoc/README.md
 
 # 性能分析文件
 *.bench

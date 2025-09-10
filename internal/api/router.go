@@ -185,16 +185,22 @@ func (r *Router) setupRoutes() {
 		ws.GET("/online", r.wsHandler.GetOnlineCount)
 	}
 	
-	// 静态文件服务
-	r.engine.Static("/static", "./static")
+    // 静态文件服务
+    r.engine.Static("/static", "./static")
+
+    // OpenAPI 文档与 Redoc 预览（无 swag 环境也可用）
+    registerOpenAPIRoutes(r.engine)
+
+	// Swagger 文档路由（按需编译启用）
+	registerSwaggerRoutes(r.engine)
 	
-	// 404处理
-	r.engine.NoRoute(func(c *gin.Context) {
-		c.JSON(404, gin.H{
-			"code":    "NOT_FOUND",
-			"message": "接口不存在",
-		})
-	})
+    // 404处理
+    r.engine.NoRoute(func(c *gin.Context) {
+        c.JSON(404, gin.H{
+            "code":    "NOT_FOUND",
+            "message": "接口不存在",
+        })
+    })
 }
 
 // healthCheck 健康检查

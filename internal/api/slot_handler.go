@@ -92,6 +92,18 @@ type SessionInfoResponse struct {
 }
 
 // Start 开始游戏
+// @Summary 开始游戏
+// @Description 扣除投注并创建会话，返回 session_id 与余额
+// @Tags Slot
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body StartRequest true "开始游戏请求"
+// @Success 200 {object} StartResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/start [post]
 func (h *SlotHandler) Start(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -155,6 +167,18 @@ func (h *SlotHandler) Start(c *gin.Context) {
 }
 
 // Spin 执行转动
+// @Summary 单次转动
+// @Description 在已有会话内执行一次转动
+// @Tags Slot
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body SpinRequest true "转动请求"
+// @Success 200 {object} SpinResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/spin [post]
 func (h *SlotHandler) Spin(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -212,6 +236,18 @@ func (h *SlotHandler) Spin(c *gin.Context) {
 }
 
 // Settle 结算游戏
+// @Summary 结算会话
+// @Description 对当前会话进行结算，返回统计数据
+// @Tags Slot
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body SettleRequest true "结算请求"
+// @Success 200 {object} SettleResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/settle [post]
 func (h *SlotHandler) Settle(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -267,6 +303,17 @@ func (h *SlotHandler) Settle(c *gin.Context) {
 }
 
 // GetHistory 获取游戏历史
+// @Summary 用户历史记录
+// @Description 获取当前用户的最近游戏历史
+// @Tags Slot
+// @Security Bearer
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量（<=100）"
+// @Success 200 {object} HistoryResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/history [get]
 func (h *SlotHandler) GetHistory(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -308,6 +355,18 @@ func (h *SlotHandler) GetHistory(c *gin.Context) {
 }
 
 // GetSessionInfo 获取会话信息
+// @Summary 会话信息
+// @Description 获取指定会话的当前状态与统计
+// @Tags Slot
+// @Security Bearer
+// @Produce json
+// @Param id path string true "会话ID"
+// @Success 200 {object} SessionInfoResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/slot/session/{id} [get]
 func (h *SlotHandler) GetSessionInfo(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -350,6 +409,18 @@ func (h *SlotHandler) GetSessionInfo(c *gin.Context) {
 }
 
 // BatchSpin 批量转动
+// @Summary 批量转动
+// @Description 连续多次转动，支持中奖/大奖阈值提前停止
+// @Tags Slot
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body game.BatchSpinRequest true "批量转动请求"
+// @Success 200 {object} game.BatchSpinResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/batch-spin [post]
 func (h *SlotHandler) BatchSpin(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -414,6 +485,15 @@ func (h *SlotHandler) BatchSpin(c *gin.Context) {
 }
 
 // GetUserStats 获取用户统计
+// @Summary 用户统计
+// @Description 获取当前用户的游戏统计信息（RTP、最大中奖等）
+// @Tags Slot
+// @Security Bearer
+// @Produce json
+// @Success 200 {object} game.UserGameStats
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/slot/stats [get]
 func (h *SlotHandler) GetUserStats(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {

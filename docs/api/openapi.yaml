@@ -1,0 +1,680 @@
+openapi: 3.0.3
+info:
+  title: Slot Game Backend API
+  version: 0.1.0
+  description: |
+    老虎机游戏后端 API 文档（基于当前代码实现整理）。
+    注意：部分响应结构含有嵌套对象/动态字段，此处以通用对象占位。
+servers:
+  - url: http://localhost:8080
+    description: Local Dev
+tags:
+  - name: Auth
+  - name: Wallet
+  - name: Slot
+  - name: System
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          type: object
+          description: Basic user info
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+        token_type:
+          type: string
+          example: Bearer
+    RegisterRequest:
+      type: object
+      required: [username, email, phone, password, confirm_password]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        password:
+          type: string
+        confirm_password:
+          type: string
+        nickname:
+          type: string
+        avatar:
+          type: string
+        invite_code:
+          type: string
+    LoginRequest:
+      type: object
+      required: [account, password]
+      properties:
+        account:
+          type: string
+          description: 用户名/邮箱/手机号
+        password:
+          type: string
+        device:
+          type: string
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+    BalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: integer
+        frozen_amount:
+          type: integer
+        available:
+          type: integer
+        currency:
+          type: string
+          example: COIN
+    DepositRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          minimum: 100
+    DepositResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        amount:
+          type: integer
+        balance:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    WithdrawRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          minimum: 100
+    WithdrawResponse:
+      allOf:
+        - $ref: '#/components/schemas/DepositResponse'
+    TransactionInfo:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_no:
+          type: string
+        type:
+          type: string
+          description: bet/win/deposit/withdraw
+        amount:
+          type: integer
+        before_balance:
+          type: integer
+        after_balance:
+          type: integer
+        description:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TransactionListResponse:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionInfo'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    StartRequest:
+      type: object
+      required: [bet_amount]
+      properties:
+        bet_amount:
+          type: integer
+          minimum: 100
+    StartResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        balance:
+          type: integer
+        message:
+          type: string
+    SpinRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+    SpinResponse:
+      type: object
+      properties:
+        result:
+          type: object
+          description: 旋转结果（结构随主题而定）
+        balance:
+          type: integer
+        state:
+          type: string
+        total_bet:
+          type: integer
+        total_win:
+          type: integer
+    BatchSpinRequest:
+      type: object
+      required: [session_id, spin_count]
+      properties:
+        session_id:
+          type: string
+        spin_count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        auto_stop:
+          type: boolean
+        stop_on_big_win:
+          type: boolean
+        big_win_amount:
+          type: integer
+    BatchSpinResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        spin_results:
+          type: array
+          items:
+            type: object
+        total_spins:
+          type: integer
+        total_bet:
+          type: integer
+        total_win:
+          type: integer
+        state:
+          type: string
+        stopped_early:
+          type: boolean
+        stop_reason:
+          type: string
+        final_balance:
+          type: integer
+    SettleRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+    SettleResponse:
+      type: object
+      properties:
+        total_bet:
+          type: integer
+        total_win:
+          type: integer
+        balance:
+          type: integer
+        rtp:
+          type: number
+          format: float
+        message:
+          type: string
+    HistoryResponse:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    SessionInfoResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        state:
+          type: string
+        spin_count:
+          type: integer
+        total_bet:
+          type: integer
+        total_win:
+          type: integer
+        rtp:
+          type: number
+        duration:
+          type: number
+        last_result:
+          type: object
+    UserGameStats:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        total_games:
+          type: integer
+        total_bet:
+          type: integer
+        total_win:
+          type: integer
+        biggest_win:
+          type: integer
+        last_played:
+          type: string
+          format: date-time
+        rtp:
+          type: number
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: 健康检查
+      responses:
+        '200':
+          description: OK
+        '500':
+          description: Unhealthy
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: 用户注册
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 登录失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 用户登出
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+        '401':
+          description: 未登录
+
+  /api/v1/auth/profile:
+    get:
+      tags: [Auth]
+      summary: 获取用户资料
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+    put:
+      tags: [Auth]
+      summary: 更新用户资料
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/auth/password:
+    put:
+      tags: [Auth]
+      summary: 修改密码
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                old_password:
+                  type: string
+                new_password:
+                  type: string
+                confirm_password:
+                  type: string
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/wallet/balance:
+    get:
+      tags: [Wallet]
+      summary: 获取余额
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+
+  /api/v1/wallet/deposit:
+    post:
+      tags: [Wallet]
+      summary: 充值（测试）
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositResponse'
+
+  /api/v1/wallet/withdraw:
+    post:
+      tags: [Wallet]
+      summary: 提现（模拟）
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawResponse'
+
+  /api/v1/wallet/transactions:
+    get:
+      tags: [Wallet]
+      summary: 交易记录
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: page_size
+          schema:
+            type: integer
+        - in: query
+          name: type
+          schema:
+            type: string
+            description: bet/win/deposit/withdraw
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+
+  /api/v1/wallet/statistics:
+    get:
+      tags: [Wallet]
+      summary: 钱包统计
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: date
+          schema:
+            type: string
+            example: 2025-09-10
+      responses:
+        '200':
+          description: OK
+
+  /api/v1/slot/start:
+    post:
+      tags: [Slot]
+      summary: 开始游戏
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+
+  /api/v1/slot/spin:
+    post:
+      tags: [Slot]
+      summary: 单次转动
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpinRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpinResponse'
+
+  /api/v1/slot/batch-spin:
+    post:
+      tags: [Slot]
+      summary: 批量转动
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSpinRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSpinResponse'
+
+  /api/v1/slot/settle:
+    post:
+      tags: [Slot]
+      summary: 结算
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettleRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettleResponse'
+
+  /api/v1/slot/history:
+    get:
+      tags: [Slot]
+      summary: 历史记录
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: page_size
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+
+  /api/v1/slot/session/{id}:
+    get:
+      tags: [Slot]
+      summary: 会话信息
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInfoResponse'
+
+  /api/v1/slot/stats:
+    get:
+      tags: [Slot]
+      summary: 用户统计
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserGameStats'
+

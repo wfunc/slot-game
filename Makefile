@@ -23,7 +23,7 @@ GREEN=\033[0;32m
 YELLOW=\033[0;33m
 NC=\033[0m # No Color
 
-.PHONY: all build run clean test deps fmt lint help
+.PHONY: all build run clean test deps fmt lint help docs run-swagger fetch-redoc
 
 # 默认目标
 all: build
@@ -34,6 +34,25 @@ build:
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME) $(MAIN_PATH)
 	@echo "$(GREEN)构建完成: $(BIN_DIR)/$(APP_NAME)$(NC)"
+
+.PHONY: fetch-redoc
+fetch-redoc:
+	@echo "$(GREEN)下载 Redoc standalone 脚本（如有网络）...$(NC)"
+	@mkdir -p static/vendors/redoc
+	@{ curl -fsSL https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js -o static/vendors/redoc/redoc.standalone.js \
+		|| wget -O static/vendors/redoc/redoc.standalone.js https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js; } \
+		&& echo "$(GREEN)Redoc 已保存到 static/vendors/redoc/redoc.standalone.js$(NC)" \
+		|| echo "$(YELLOW)下载失败，请在有网络环境手动下载到 static/vendors/redoc/redoc.standalone.js$(NC)"
+
+.PHONY: fetch-swagger-ui
+fetch-swagger-ui:
+	@echo "$(GREEN)下载 Swagger UI 静态资源（如有网络）...$(NC)"
+	@mkdir -p static/vendors/swagger-ui
+	@{ curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui.css -o static/vendors/swagger-ui/swagger-ui.css \
+		&& curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js -o static/vendors/swagger-ui/swagger-ui-bundle.js \
+		&& curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js -o static/vendors/swagger-ui/swagger-ui-standalone-preset.js; } \
+		&& echo "$(GREEN)Swagger UI 已保存到 static/vendors/swagger-ui/$(NC)" \
+		|| echo "$(YELLOW)下载失败，请手动将 swagger-ui-dist 文件放到 static/vendors/swagger-ui/$(NC)"
 
 # 运行项目
 run: build
@@ -69,17 +88,20 @@ update:
 # 运行测试（禁用缓存）
 test:
 	@echo "$(GREEN)运行测试...$(NC)"
-	$(GO) test -v -race -cover -count=1 ./...
+	@mkdir -p .gocache .gotmp
+	GOCACHE=$(PWD)/.gocache GOTMPDIR=$(PWD)/.gotmp $(GO) test -v -race -cover -count=1 ./...
 
 # 运行测试（过滤警告）
 test-quiet:
 	@echo "$(GREEN)运行测试（过滤链接器警告）...$(NC)"
-	@$(GO) test -v -race -cover -count=1 ./... 2>&1 | ( grep -v "ld: warning.*LC_DYSYMTAB" || true )
+	@mkdir -p .gocache .gotmp
+	@GOCACHE=$(PWD)/.gocache GOTMPDIR=$(PWD)/.gotmp $(GO) test -v -race -cover -count=1 ./... 2>&1 | ( grep -v "ld: warning.*LC_DYSYMTAB" || true )
 
 # 测试仓储层
 test-repo:
 	@echo "$(GREEN)运行仓储层测试...$(NC)"
-	$(GO) test -v -count=1 ./internal/repository/...
+	@mkdir -p .gocache .gotmp
+	GOCACHE=$(PWD)/.gocache GOTMPDIR=$(PWD)/.gotmp $(GO) test -v -count=1 ./internal/repository/...
 
 # 清理测试缓存
 test-clean:
@@ -90,7 +112,8 @@ test-clean:
 # 测试覆盖率
 coverage:
 	@echo "$(GREEN)生成测试覆盖率报告...$(NC)"
-	$(GO) test -v -race -coverprofile=coverage.out -count=1 ./...
+	@mkdir -p .gocache .gotmp
+	GOCACHE=$(PWD)/.gocache GOTMPDIR=$(PWD)/.gotmp $(GO) test -v -race -coverprofile=coverage.out -count=1 ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "$(GREEN)覆盖率报告: coverage.html$(NC)"
 
@@ -164,12 +187,17 @@ docker-run:
 
 # 生成文档
 docs:
-	@echo "$(GREEN)生成API文档...$(NC)"
+	@echo "$(GREEN)生成Swagger文档(go注解)...$(NC)"
 	@if ! which swag > /dev/null; then \
 		echo "$(YELLOW)安装 swag...$(NC)"; \
 		go install github.com/swaggo/swag/cmd/swag@latest; \
 	fi
-	swag init -g $(MAIN_PATH) -o docs/api
+	swag init -g $(MAIN_PATH) -o docs/swagger
+
+.PHONY: run-swagger
+run-swagger:
+	@echo "$(GREEN)以 swagger 标记运行，启用 /swagger UI...$(NC)"
+	$(GO) run -tags swagger $(MAIN_PATH) -config=$(CONFIG_FILE)
 
 # 版本信息
 version:

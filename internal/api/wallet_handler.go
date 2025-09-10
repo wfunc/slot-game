@@ -88,6 +88,15 @@ type TransactionInfo struct {
 }
 
 // GetBalance 获取余额
+// @Summary 获取余额
+// @Description 获取当前用户钱包余额与可用余额
+// @Tags Wallet
+// @Security Bearer
+// @Produce json
+// @Success 200 {object} BalanceResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/wallet/balance [get]
 func (h *WalletHandler) GetBalance(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -140,6 +149,18 @@ func (h *WalletHandler) GetBalance(c *gin.Context) {
 }
 
 // Deposit 充值（测试用）
+// @Summary 充值（测试）
+// @Description 增加账户余额，测试用接口
+// @Tags Wallet
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body DepositRequest true "充值请求"
+// @Success 200 {object} DepositResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/wallet/deposit [post]
 func (h *WalletHandler) Deposit(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -227,6 +248,18 @@ func (h *WalletHandler) Deposit(c *gin.Context) {
 }
 
 // Withdraw 提现（模拟）
+// @Summary 提现（模拟）
+// @Description 扣减账户余额，模拟提现流程
+// @Tags Wallet
+// @Security Bearer
+// @Accept json
+// @Produce json
+// @Param request body WithdrawRequest true "提现请求"
+// @Success 200 {object} WithdrawResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/wallet/withdraw [post]
 func (h *WalletHandler) Withdraw(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -321,6 +354,18 @@ func (h *WalletHandler) Withdraw(c *gin.Context) {
 }
 
 // GetTransactions 获取交易记录
+// @Summary 交易记录
+// @Description 获取当前用户的交易记录（支持类型过滤与分页）
+// @Tags Wallet
+// @Security Bearer
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量（<=100）"
+// @Param type query string false "交易类型（bet/win/deposit/withdraw）"
+// @Success 200 {object} TransactionListResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/wallet/transactions [get]
 func (h *WalletHandler) GetTransactions(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {
@@ -395,6 +440,16 @@ func (h *WalletHandler) GetTransactions(c *gin.Context) {
 }
 
 // GetStatistics 获取钱包统计
+// @Summary 钱包统计
+// @Description 获取指定日期的钱包统计信息
+// @Tags Wallet
+// @Security Bearer
+// @Produce json
+// @Param date query string false "日期，格式YYYY-MM-DD"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/wallet/statistics [get]
 func (h *WalletHandler) GetStatistics(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists || userID == 0 {

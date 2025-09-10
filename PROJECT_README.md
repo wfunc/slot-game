@@ -167,6 +167,102 @@ make help        # 查看帮助
 - [产品需求文档](docs/prd/backend-prd.md)
 - [系统架构设计](docs/architecture/system-design.md)
 - [开发任务清单](docs/development/backend-todo.md)
+- [OpenAPI 文档](docs/api/openapi.yaml)
+
+## 📘 预览 API 文档（OpenAPI）
+
+方法一：使用 swagger-ui 容器（无需安装依赖）
+
+```bash
+docker run --rm -p 8081:8080 \
+  -e SWAGGER_JSON=/spec/openapi.yaml \
+  -v $(pwd)/docs/api/openapi.yaml:/spec/openapi.yaml \
+  swaggerapi/swagger-ui
+
+# 打开浏览器访问 http://localhost:8081
+```
+
+方法二：使用 Redocly（需要 Node 环境）
+
+```bash
+npx @redocly/cli preview-docs docs/api/openapi.yaml
+# 打开输出的本地预览地址
+```
+
+方法三：VSCode 插件
+
+- 安装 "OpenAPI (Swagger) Editor" 或 "Redocly" 插件，直接打开 `docs/api/openapi.yaml` 即可预览。
+
+备注：如果需要基于源码注解自动生成文档，可安装 `swag` 并使用：`make docs`（输出到 `docs/swagger/`）。
+
+## 🧭 内置文档页面（gin-swagger）
+
+通过构建标签启用 swagger 路由（避免默认构建引入额外依赖）。
+
+```bash
+# 1) 生成 swagger 文档（基于源码注解）
+make docs            # 产物：docs/swagger（Go 包，含 doc.json）
+
+# 2) 运行服务并启用 /swagger 页面
+make run-swagger     # 等价于：go run -tags swagger cmd/server/main.go -config=config/config.yaml
+
+# 3) 浏览器访问
+http://localhost:8080/swagger/index.html
+
+增强版 Swagger UI（带导航）
+
+```text
+http://localhost:8080/docs/ui
+```
+说明：该页面基于 swagger-ui-dist（CDN 或本地）渲染 /openapi，并在顶部提供跳转入口到 Redoc 与 YAML。
+```
+
+说明：
+- 非 swagger 构建不依赖 gin-swagger；仅在 `-tags swagger` 时才编译相关依赖与路由。
+- 仍可使用 `docs/api/openapi.yaml` 进行手工维护与预览。
+
+## 🌐 在线查看（无 swag 环境）
+
+无需生成 swagger 文档，也可直接访问：
+
+- OpenAPI YAML: `GET /openapi` 或 `GET /openapi.yaml`
+- Redoc 页面: `GET /docs/redoc`（浏览器加载 CDN 脚本渲染）
+
+说明：服务器需能访问 Redoc CDN 才能渲染 UI；若离线环境，可将 Redoc 脚本打包到 `static/` 并修改路由引用。
+
+## 📴 离线 Redoc 使用
+
+1) 从有网络环境下载 Redoc 脚本到本项目：
+
+```bash
+make fetch-redoc
+# 或手动：
+# curl -fsSL https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js \
+#   -o static/vendors/redoc/redoc.standalone.js
+```
+
+2) 启动服务后访问：`http://localhost:8080/docs/redoc`
+
+说明：路由会优先使用 `static/vendors/redoc/redoc.standalone.js`，若不存在则回退到 CDN。
+
+## 📴 离线 Swagger UI 使用（增强版 /docs/ui）
+
+1) 下载静态资源到项目：
+
+```bash
+make fetch-swagger-ui
+# 或手动：
+# curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui.css \
+#   -o static/vendors/swagger-ui/swagger-ui.css
+# curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js \
+#   -o static/vendors/swagger-ui/swagger-ui-bundle.js
+# curl -fsSL https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js \
+#   -o static/vendors/swagger-ui/swagger-ui-standalone-preset.js
+```
+
+2) 启动服务后访问：`http://localhost:8080/docs/ui`
+
+说明：该页面会优先加载 `static/vendors/swagger-ui/*`，不存在时回退到 CDN。
 
 ## 🔗 下一步计划
 
