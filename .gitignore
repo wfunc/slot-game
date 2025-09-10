@@ -131,3 +131,4 @@ yarn.lock
 
 # claudedocs 目录（如果不想提交Claude生成的文档）
 # claudedocs/
+.DS_Store
