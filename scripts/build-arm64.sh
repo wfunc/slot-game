@@ -202,10 +202,40 @@ if [ -d "./logs" ]; then
 fi
 EOF
 
-# 创建systemd服务文件
-cat > $RELEASE_DIR/slot-game.service << 'EOF'
+# 创建两个版本的服务文件
+
+# 1. 专用用户版本 (sg用户 - 推荐)
+cat > $RELEASE_DIR/slot-game-sg.service << 'EOF'
 [Unit]
-Description=Slot Game Server
+Description=Slot Game Server (Dedicated User)
+After=network.target
+
+[Service]
+Type=simple
+User=sg
+Group=sg
+WorkingDirectory=/home/sg/slot-game
+ExecStart=/home/sg/slot-game/slot-game
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/sg/slot-game/logs/service.log
+StandardError=append:/home/sg/slot-game/logs/service-error.log
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 环境变量
+Environment="GIN_MODE=release"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 2. 兼容版本 (ztl用户)
+cat > $RELEASE_DIR/slot-game-ztl.service << 'EOF'
+[Unit]
+Description=Slot Game Server (ZTL User)
 After=network.target
 
 [Service]
@@ -230,10 +260,80 @@ Environment="GIN_MODE=release"
 WantedBy=multi-user.target
 EOF
 
-# 创建Chromium Kiosk服务文件
-cat > $RELEASE_DIR/chromium-kiosk.service << 'EOF'
+# 创建Chromium Kiosk服务文件（两个版本）
+
+# 1. 专用用户版本 (sg用户 - 推荐)
+cat > $RELEASE_DIR/chromium-kiosk-sg.service << 'EOF'
 [Unit]
-Description=Chromium Kiosk for Slot Game Web Interface
+Description=Chromium Kiosk for Slot Game Web Interface (Dedicated User)
+After=graphical-session.target slot-game.service
+Wants=graphical-session.target
+Requires=slot-game.service
+
+[Service]
+Type=simple
+User=sg
+Group=sg
+Environment="DISPLAY=:0"
+Environment="XDG_SESSION_TYPE=x11"
+Environment="OZONE_PLATFORM=x11"
+Environment="HOME=/home/sg"
+
+# 等待slot-game服务完全启动（最多等待30秒）
+# 使用多种方法检测，不依赖curl
+ExecStartPre=/bin/bash -c 'timeout=30; while [ $timeout -gt 0 ]; do \
+  if command -v curl >/dev/null 2>&1 && curl -f http://127.0.0.1:8080 >/dev/null 2>&1; then \
+    exit 0; \
+  elif command -v wget >/dev/null 2>&1 && wget -q -O /dev/null http://127.0.0.1:8080 2>/dev/null; then \
+    exit 0; \
+  elif nc -z 127.0.0.1 8080 2>/dev/null; then \
+    echo "Port 8080 is open, assuming service is ready"; \
+    exit 0; \
+  elif [ -f /proc/net/tcp ] && grep -q ":1F90" /proc/net/tcp; then \
+    echo "Port 8080 (0x1F90) found in /proc/net/tcp"; \
+    exit 0; \
+  fi; \
+  echo "Waiting for slot-game service... ($timeout seconds left)"; \
+  sleep 2; \
+  timeout=$((timeout-2)); \
+done; \
+echo "Error: slot-game service not responding on port 8080"; \
+echo "Tip: Install curl or wget for better health checks"; \
+exit 1'
+
+# 启动Chromium Kiosk
+ExecStart=/usr/bin/chromium \
+  --user-data-dir=/tmp/chromium-kiosk \
+  --kiosk --start-fullscreen \
+  --new-window "http://127.0.0.1:8080/static/web-mobile/?token=68bf99c4aedf1c000b000434&type=zoo" \
+  --use-gl=egl \
+  --enable-gpu-rasterization \
+  --ignore-gpu-blocklist \
+  --disable-software-rasterizer \
+  --canvas-oop-rasterization=disabled \
+  --enable-accelerated-video-decode \
+  --enable-features=VaapiVideoDecoder,VaapiVideoEncoder \
+  --ozone-platform=x11 \
+  --no-first-run --no-default-browser-check \
+  --password-store=basic \
+  --disable-password-manager-reauth \
+  --disable-features=BackForwardCache,LowPriorityIframes \
+  --disable-background-timer-throttling \
+  --disable-renderer-backgrounding
+
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/sg/slot-game/logs/kiosk.log
+StandardError=append:/home/sg/slot-game/logs/kiosk-error.log
+
+[Install]
+WantedBy=default.target
+EOF
+
+# 2. 兼容版本 (ztl用户)
+cat > $RELEASE_DIR/chromium-kiosk-ztl.service << 'EOF'
+[Unit]
+Description=Chromium Kiosk for Slot Game Web Interface (ZTL User)
 After=graphical-session.target slot-game.service
 Wants=graphical-session.target
 Requires=slot-game.service
@@ -298,157 +398,47 @@ StandardError=append:/home/ztl/slot-game-arm64/logs/kiosk-error.log
 WantedBy=default.target
 EOF
 
-# 创建安装脚本
-cat > $RELEASE_DIR/install.sh << 'EOF'
+# 复制自动化安装脚本
+echo -e "${GREEN}复制自动化安装脚本...${NC}"
+if [ -f "scripts/install.sh" ]; then
+    cp scripts/install.sh $RELEASE_DIR/install.sh
+    chmod +x $RELEASE_DIR/install.sh
+    echo -e "${GREEN}✓ 已复制自动化安装脚本${NC}"
+else
+    echo -e "${YELLOW}⚠ 未找到自动化安装脚本，使用内置版本${NC}"
+    # 创建备用安装脚本（简化版）
+    cat > $RELEASE_DIR/install.sh << 'EOF'
 #!/bin/bash
-
-# 系统服务安装脚本
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
-# 检查是否为root用户
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}请使用sudo运行此脚本${NC}"
-    exit 1
-fi
-
-# 检查必要的工具
-echo -e "${GREEN}检查系统依赖...${NC}"
-missing_tools=""
-
-if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-    echo -e "${YELLOW}⚠ 未检测到 curl 或 wget${NC}"
-    missing_tools="${missing_tools} curl"
-fi
-
-if ! command -v nc >/dev/null 2>&1 && ! command -v netcat >/dev/null 2>&1; then
-    echo -e "${YELLOW}⚠ 未检测到 nc (netcat)${NC}"
-    missing_tools="${missing_tools} netcat"
-fi
-
-if [ -n "$missing_tools" ]; then
-    echo -e "${YELLOW}建议安装以下工具以获得更好的服务监控：${NC}"
-    echo -e "${YELLOW}  sudo apt update && sudo apt install -y${missing_tools}${NC}"
-    echo ""
-    read -p "是否继续安装（服务仍可工作，但健康检查功能受限）？[y/N]: " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${RED}安装已取消${NC}"
-        exit 0
-    fi
-fi
-
-# 检测已安装的服务
-echo -e "${GREEN}检测已安装的服务...${NC}"
-existing_services=""
-
-if [ -f /etc/systemd/system/slot-game.service ]; then
-    echo -e "${YELLOW}检测到已安装的 slot-game.service${NC}"
-    existing_services="slot-game"
-    
-    # 检查服务状态
-    if systemctl is-active slot-game >/dev/null 2>&1; then
-        echo -e "${YELLOW}slot-game 服务正在运行${NC}"
-        echo -e "${GREEN}正在停止服务...${NC}"
-        systemctl stop slot-game
-    fi
-fi
-
-if [ -f /etc/systemd/system/chromium-kiosk.service ]; then
-    echo -e "${YELLOW}检测到已安装的 chromium-kiosk.service${NC}"
-    existing_services="${existing_services} chromium-kiosk"
-    
-    # 检查服务状态
-    if systemctl is-active chromium-kiosk >/dev/null 2>&1; then
-        echo -e "${YELLOW}chromium-kiosk 服务正在运行${NC}"
-        echo -e "${GREEN}正在停止服务...${NC}"
-        systemctl stop chromium-kiosk
-    fi
-fi
-
-if [ -n "$existing_services" ]; then
-    echo ""
-    echo -e "${YELLOW}⚠️  发现已安装的服务，是否继续安装（将覆盖旧版本）？${NC}"
-    echo -e "${YELLOW}已安装的服务: $existing_services${NC}"
-    read -p "继续安装？[y/N]: " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${RED}安装已取消${NC}"
-        exit 0
-    fi
-fi
-
-# 安装选项
-echo -e "${GREEN}选择安装模式:${NC}"
-echo "1) 仅安装slot-game服务"
-echo "2) 仅安装chromium-kiosk服务"
-echo "3) 安装两个服务（完整系统）"
-read -p "请选择 [1-3]: " install_choice
-
-case $install_choice in
-    1)
-        # 仅安装slot-game
-        echo -e "${GREEN}安装slot-game服务...${NC}"
-        cp slot-game.service /etc/systemd/system/
-        systemctl daemon-reload
-        systemctl enable slot-game.service
-        echo -e "${GREEN}slot-game服务安装完成！${NC}"
-        ;;
-    2)
-        # 仅安装kiosk
-        echo -e "${GREEN}安装chromium-kiosk服务...${NC}"
-        cp chromium-kiosk.service /etc/systemd/system/
-        systemctl daemon-reload
-        systemctl enable chromium-kiosk.service
-        echo -e "${GREEN}chromium-kiosk服务安装完成！${NC}"
-        ;;
-    3)
-        # 安装两个服务
-        echo -e "${GREEN}安装完整系统服务...${NC}"
-        cp slot-game.service /etc/systemd/system/
-        cp chromium-kiosk.service /etc/systemd/system/
-        systemctl daemon-reload
-        systemctl enable slot-game.service
-        systemctl enable chromium-kiosk.service
-        echo -e "${GREEN}所有服务安装完成！${NC}"
-        ;;
-    *)
-        echo -e "${RED}无效选择${NC}"
-        exit 1
-        ;;
-esac
-
-echo ""
-echo -e "${GREEN}服务管理命令:${NC}"
-echo ""
-echo "📦 Slot Game服务:"
-echo "  启动: sudo systemctl start slot-game"
-echo "  停止: sudo systemctl stop slot-game"
-echo "  重启: sudo systemctl restart slot-game"
-echo "  状态: sudo systemctl status slot-game"
-echo "  日志: sudo journalctl -u slot-game -f"
-echo ""
-echo "🖥️ Chromium Kiosk服务:"
-echo "  启动: sudo systemctl start chromium-kiosk"
-echo "  停止: sudo systemctl stop chromium-kiosk"
-echo "  重启: sudo systemctl restart chromium-kiosk"
-echo "  状态: sudo systemctl status chromium-kiosk"
-echo "  日志: sudo journalctl -u chromium-kiosk -f"
-echo ""
-echo "🔄 同时管理两个服务:"
-echo "  启动全部: sudo systemctl start slot-game chromium-kiosk"
-echo "  停止全部: sudo systemctl stop chromium-kiosk slot-game"
-echo "  重启全部: sudo systemctl restart slot-game && sudo systemctl restart chromium-kiosk"
+echo "请使用最新的自动化安装脚本"
+echo "从项目仓库获取: scripts/install.sh"
+exit 1
 EOF
+fi
 
 # 创建README
 cat > $RELEASE_DIR/README.md << 'EOF'
 # 老虎机游戏服务部署说明
 
-## 快速开始
+## 一键自动安装（推荐）
+
+```bash
+# 解压并自动安装
+tar -xzf slot-game-arm64.tar.gz
+cd slot-game-arm64
+sudo ./install.sh
+
+# 安装完成后重启系统
+sudo reboot
+```
+
+**安装脚本会自动：**
+- 创建专用的 sg 用户运行 slot-game 服务
+- 配置 ztl 用户运行 chromium-kiosk 服务
+- 设置所有必要的权限和目录
+- 配置服务开机自启动
+- 无需任何用户交互，完全自动化
+
+## 快速开始（手动模式）
 
 1. **解压文件**
    ```bash
@@ -468,27 +458,31 @@ cat > $RELEASE_DIR/README.md << 'EOF'
 
 ## 脚本说明
 
-- `start.sh` - 启动服务
-- `stop.sh` - 停止服务
+- `install.sh` - 一键自动安装脚本（无需交互，推荐使用）
+- `start.sh` - 手动启动服务
+- `stop.sh` - 手动停止服务
 - `status.sh` - 查看服务状态
-- `install.sh` - 安装为系统服务（需要sudo，支持选择安装模式）
+- `setup-user.sh` - 用户管理脚本（install.sh会自动调用）
+- `fix-chromium-path.sh` - 修复Chromium路径问题（如遇到浏览器路径错误）
 
 ## 服务介绍
 
 ### 1. Slot Game服务
 主游戏服务器，提供HTTP和WebSocket接口：
+- 运行用户：sg（专用用户，数据隔离）
 - HTTP端口：8080
 - WebSocket路径：/ws/game
-- 数据库：SQLite（位于 `/home/ztl/slot-game-arm64/data/`）
-- 工作目录：`/home/ztl/slot-game-arm64`
-- 日志：`/home/ztl/slot-game-arm64/logs/service.log`
+- 数据库：SQLite（位于 `/home/sg/slot-game/data/`）
+- 工作目录：`/home/sg/slot-game`
+- 日志：通过 journalctl -u slot-game 查看
 
-### 2. Chromium Kiosk服务（可选）
+### 2. Chromium Kiosk服务
 全屏浏览器模式，自动打开游戏界面：
+- 运行用户：ztl（图形界面用户）
 - 依赖：需要slot-game服务先启动
 - 特性：自动等待服务就绪后启动
-- URL：自动加载游戏界面（可在服务文件中修改token参数）
-- 日志：`/home/ztl/slot-game-arm64/logs/kiosk.log`
+- URL：自动加载游戏界面
+- 日志：通过 journalctl -u chromium-kiosk 查看
 
 ## 配置文件
 
@@ -535,9 +529,14 @@ slot-game-arm64/
 4. **Chromium Kiosk问题**
    - 检查图形环境：`echo $DISPLAY`（应该显示:0）
    - 确认slot-game服务已启动：`systemctl status slot-game`
-   - 检查Chromium是否安装：`which chromium`
-   - 查看Kiosk日志：`tail -f logs/kiosk-error.log`
+   - 检查Chromium是否安装：`which chromium` 或 `which chromium-browser`
+   - 查看Kiosk日志：`journalctl -u chromium-kiosk -f`
    - 手动测试连接：`curl http://127.0.0.1:8080`
+   
+   **常见错误："/usr/bin/chromium-browser: No such file or directory"**
+   - 原因：不同Ubuntu版本的Chromium路径不同
+   - 解决：运行 `sudo ./fix-chromium-path.sh` 自动修复路径
+   - 或手动安装：`sudo apt install chromium-browser` 或 `sudo apt install chromium`
 
 ## 技术支持
 
@@ -655,6 +654,27 @@ echo "4. sudo systemctl start chromium-kiosk"
 echo "================================================"
 EOF
 
+# 复制用户管理脚本
+cp scripts/setup-user.sh $RELEASE_DIR/
+
+# 复制修复脚本
+if [ -f "scripts/fix-chromium-path.sh" ]; then
+    cp scripts/fix-chromium-path.sh $RELEASE_DIR/
+    echo -e "${GREEN}✓ 已复制 Chromium 路径修复脚本${NC}"
+fi
+
+# 复制优化脚本
+if [ -f "scripts/chromium-optimized.sh" ]; then
+    cp scripts/chromium-optimized.sh $RELEASE_DIR/
+    echo -e "${GREEN}✓ 已复制 Chromium 优化配置脚本${NC}"
+fi
+
+# 复制测试脚本
+if [ -f "scripts/test-chromium-modes.sh" ]; then
+    cp scripts/test-chromium-modes.sh $RELEASE_DIR/
+    echo -e "${GREEN}✓ 已复制 GPU 模式测试脚本${NC}"
+fi
+
 # 设置脚本权限
 chmod +x $RELEASE_DIR/*.sh
 
@@ -674,11 +694,19 @@ echo "================================================"
 echo "输出文件: release/slot-game-arm64.tar.gz"
 echo "文件大小: $SIZE"
 echo ""
-echo "部署步骤:"
+echo "部署步骤（一键自动安装）:"
 echo "1. 复制到目标机器: scp release/slot-game-arm64.tar.gz ztl@<目标IP>:~/"
 echo "2. 登录目标机器: ssh ztl@<目标IP>"
 echo "3. 解压文件: tar -xzf slot-game-arm64.tar.gz"
 echo "4. 进入目录: cd slot-game-arm64"
-echo "5. 启动服务: ./start.sh"
+echo "5. 自动安装: sudo ./install.sh"
+echo "6. 重启系统: sudo reboot"
 echo ""
-echo -e "${YELLOW}提示: 首次运行会自动创建数据库和必要目录${NC}"
+echo -e "${GREEN}✅ 安装脚本会自动完成所有配置，无需用户交互${NC}"
+echo -e "${GREEN}✅ 重启后服务会自动启动（slot-game在sg用户，chromium在ztl用户）${NC}"
+echo ""
+echo "手动启动（可选）:"
+echo "- 启动服务: ./start.sh"
+echo "- 查看状态: slot-game-manage status"
+echo ""
+echo -e "${YELLOW}提示: 安装脚本会自动创建sg用户、配置权限、设置开机自启${NC}"
