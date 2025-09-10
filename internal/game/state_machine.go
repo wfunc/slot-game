@@ -123,6 +123,34 @@ func (sm *StateMachine) initTransitions() {
 		},
 	})
 	
+	// 准备 -> 待机（取消）
+	sm.addTransition(StateTransition{
+		From:  StateReady,
+		Event: "cancel",
+		To:    StateIdle,
+		Action: func(ctx context.Context, sm *StateMachine) error {
+			sm.logger.Info("取消游戏", 
+				zap.String("session_id", sm.sessionID),
+				zap.Int64("bet_amount", sm.betAmount))
+			sm.betAmount = 0
+			return nil
+		},
+	})
+	
+	// 准备 -> 待机（超时）
+	sm.addTransition(StateTransition{
+		From:  StateReady,
+		Event: "timeout",
+		To:    StateIdle,
+		Action: func(ctx context.Context, sm *StateMachine) error {
+			sm.logger.Info("游戏超时", 
+				zap.String("session_id", sm.sessionID),
+				zap.Int64("bet_amount", sm.betAmount))
+			sm.betAmount = 0
+			return nil
+		},
+	})
+	
 	// 转动中 -> 计算中奖
 	sm.addTransition(StateTransition{
 		From:  StateSpinning,

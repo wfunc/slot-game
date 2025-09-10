@@ -2,26 +2,34 @@ package game
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/wfunc/slot-game/internal/models"
+	"github.com/wfunc/slot-game/internal/repository"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // RecoveryManager 游戏恢复管理器
 type RecoveryManager struct {
-	logger    *zap.Logger
-	persister StatePersister
-	timeout   time.Duration // 会话超时时间
+	logger       *zap.Logger
+	persister    StatePersister
+	walletRepo   repository.WalletRepository
+	db           *gorm.DB
+	timeout      time.Duration // 会话超时时间
 }
 
 // NewRecoveryManager 创建恢复管理器
-func NewRecoveryManager(logger *zap.Logger, persister StatePersister, timeout time.Duration) *RecoveryManager {
+func NewRecoveryManager(logger *zap.Logger, persister StatePersister, db *gorm.DB, timeout time.Duration) *RecoveryManager {
 	return &RecoveryManager{
-		logger:    logger,
-		persister: persister,
-		timeout:   timeout,
+		logger:       logger,
+		persister:    persister,
+		walletRepo:   repository.NewWalletRepository(db),
+		db:           db,
+		timeout:      timeout,
 	}
 }
 
@@ -102,9 +110,65 @@ func (rm *RecoveryManager) recoverReady(ctx context.Context, sm *StateMachine) e
 	
 	// 检查是否超过最大等待时间（例如5分钟）
 	if time.Since(sm.lastUpdate) > 5*time.Minute {
-		rm.logger.Info("准备状态超时，退还投注",
-			zap.String("session_id", sm.sessionID))
-		// TODO: 触发退款流程
+		rm.logger.Info("准备状态超时，执行退款",
+			zap.String("session_id", sm.sessionID),
+			zap.Int64("refund_amount", sm.betAmount))
+		
+		// 执行退款流程
+		err := rm.db.Transaction(func(tx *gorm.DB) error {
+			// 创建事务内的钱包仓储
+			walletRepo := repository.NewWalletRepository(tx)
+			
+			// 退还投注金额到用户钱包
+			if err := walletRepo.AddBalance(ctx, sm.userID, sm.betAmount); err != nil {
+				return fmt.Errorf("退款失败: %w", err)
+			}
+			
+			// 获取钱包当前余额
+			wallet, err := walletRepo.FindByUserID(ctx, sm.userID)
+			if err != nil {
+				return fmt.Errorf("获取钱包信息失败: %w", err)
+			}
+			
+			// 创建退款交易记录
+			transaction := &models.Transaction{
+				UserID:        sm.userID,
+				OrderNo:       fmt.Sprintf("REFUND_%s_%d", sm.sessionID, time.Now().Unix()),
+				Type:          "refund",
+				SubType:       "game_timeout",
+				Amount:        sm.betAmount,
+				BeforeBalance: wallet.Balance - sm.betAmount,
+				AfterBalance:  wallet.Balance,
+				Currency:      "CNY",
+				Status:        "success",
+				RefID:         sm.sessionID,
+				RefType:       "game_session",
+				Description:   "游戏超时退款",
+				Remark:        fmt.Sprintf("会话 %s 准备状态超时，退还投注金额", sm.sessionID),
+			}
+			processedAt := time.Now()
+			transaction.ProcessedAt = &processedAt
+			
+			if err := tx.Create(transaction).Error; err != nil {
+				return fmt.Errorf("创建退款记录失败: %w", err)
+			}
+			
+			rm.logger.Info("退款成功",
+				zap.String("session_id", sm.sessionID),
+				zap.Uint("user_id", sm.userID),
+				zap.Int64("amount", sm.betAmount),
+				zap.String("order_no", transaction.OrderNo))
+			
+			return nil
+		})
+		
+		if err != nil {
+			rm.logger.Error("退款事务失败",
+				zap.String("session_id", sm.sessionID),
+				zap.Error(err))
+			// 即使退款失败，也要触发超时以清理状态
+		}
+		
 		return sm.Trigger(ctx, "timeout")
 	}
 	
@@ -145,11 +209,99 @@ func (rm *RecoveryManager) recoverWinning(ctx context.Context, sm *StateMachine)
 
 // recoverSettlement 恢复结算状态
 func (rm *RecoveryManager) recoverSettlement(ctx context.Context, sm *StateMachine) error {
-	rm.logger.Info("从结算状态恢复，完成游戏",
-		zap.String("session_id", sm.sessionID))
+	rm.logger.Info("从结算状态恢复，检查结算完成性",
+		zap.String("session_id", sm.sessionID),
+		zap.Int64("win_amount", sm.winAmount))
 	
-	// 确保结算完成，然后结束游戏
-	// TODO: 检查结算是否真的完成
+	// 检查结算是否真的完成
+	if sm.winAmount > 0 {
+		// 查询是否已存在结算成功的交易记录
+		var existingTransaction models.Transaction
+		err := rm.db.WithContext(ctx).
+			Where("ref_id = ? AND ref_type = ? AND type = ? AND status = ?", 
+				sm.sessionID, "game_session", "win", "success").
+			First(&existingTransaction).Error
+		
+		if err == gorm.ErrRecordNotFound {
+			// 没有找到结算记录，需要重新执行结算
+			rm.logger.Warn("未找到结算记录，重新执行结算",
+				zap.String("session_id", sm.sessionID),
+				zap.Int64("win_amount", sm.winAmount))
+			
+			// 执行结算
+			err := rm.db.Transaction(func(tx *gorm.DB) error {
+				walletRepo := repository.NewWalletRepository(tx)
+				
+				// 添加中奖金额到钱包
+				if err := walletRepo.AddBalance(ctx, sm.userID, sm.winAmount); err != nil {
+					return fmt.Errorf("添加中奖金额失败: %w", err)
+				}
+				
+				// 获取钱包信息
+				wallet, err := walletRepo.FindByUserID(ctx, sm.userID)
+				if err != nil {
+					return fmt.Errorf("获取钱包信息失败: %w", err)
+				}
+				
+				// 创建中奖交易记录
+				transaction := &models.Transaction{
+					UserID:        sm.userID,
+					OrderNo:       fmt.Sprintf("WIN_%s_%d", sm.sessionID, time.Now().Unix()),
+					Type:          "win",
+					SubType:       "game_recovery",
+					Amount:        sm.winAmount,
+					BeforeBalance: wallet.Balance - sm.winAmount,
+					AfterBalance:  wallet.Balance,
+					Currency:      "CNY",
+					Status:        "success",
+					RefID:         sm.sessionID,
+					RefType:       "game_session",
+					Description:   "游戏中奖（恢复结算）",
+					Remark:        fmt.Sprintf("会话 %s 恢复时完成结算", sm.sessionID),
+				}
+				processedAt := time.Now()
+				transaction.ProcessedAt = &processedAt
+				
+				if err := tx.Create(transaction).Error; err != nil {
+					return fmt.Errorf("创建中奖记录失败: %w", err)
+				}
+				
+				// 更新钱包统计
+				if err := walletRepo.UpdateStatistics(ctx, sm.userID, "total_win", sm.winAmount); err != nil {
+					rm.logger.Warn("更新钱包统计失败", 
+						zap.Uint("user_id", sm.userID),
+						zap.Error(err))
+				}
+				
+				rm.logger.Info("恢复结算成功",
+					zap.String("session_id", sm.sessionID),
+					zap.Uint("user_id", sm.userID),
+					zap.Int64("amount", sm.winAmount),
+					zap.String("order_no", transaction.OrderNo))
+				
+				return nil
+			})
+			
+			if err != nil {
+				rm.logger.Error("恢复结算失败",
+					zap.String("session_id", sm.sessionID),
+					zap.Error(err))
+				// 结算失败，保持在结算状态等待手动处理
+				return fmt.Errorf("恢复结算失败: %w", err)
+			}
+		} else if err == nil {
+			// 找到了结算记录，说明已经结算过了
+			rm.logger.Info("结算已完成，直接结束游戏",
+				zap.String("session_id", sm.sessionID),
+				zap.String("transaction_order", existingTransaction.OrderNo),
+				zap.Int64("amount", existingTransaction.Amount))
+		} else {
+			// 查询出错
+			return fmt.Errorf("查询结算记录失败: %w", err)
+		}
+	}
+	
+	// 结束游戏
 	return sm.Trigger(ctx, "finish")
 }
 
@@ -175,25 +327,214 @@ func (rm *RecoveryManager) recoverToIdle(ctx context.Context, sm *StateMachine) 
 
 // CleanupExpiredSessions 清理过期会话（定期任务）
 func (rm *RecoveryManager) CleanupExpiredSessions(ctx context.Context) error {
-	// TODO: 实现批量清理过期会话
-	// 这需要在持久化层添加批量查询和删除的接口
-	rm.logger.Info("开始清理过期会话")
+	rm.logger.Info("开始清理过期会话",
+		zap.Duration("timeout", rm.timeout))
 	
-	// 示例实现（需要扩展持久化接口）
-	// sessions, err := rm.persister.LoadExpired(ctx, rm.timeout)
-	// if err != nil {
-	//     return err
-	// }
-	// 
-	// for _, session := range sessions {
-	//     if err := rm.persister.Delete(ctx, session.SessionID); err != nil {
-	//         rm.logger.Error("删除过期会话失败", 
-	//             zap.String("session_id", session.SessionID),
-	//             zap.Error(err))
-	//     }
-	// }
+	// 计算过期时间点
+	expiredBefore := time.Now().Add(-rm.timeout)
+	
+	// 查询所有过期的游戏状态
+	var expiredStates []models.GameState
+	err := rm.db.WithContext(ctx).
+		Where("updated_at < ? AND current_state != ?", expiredBefore, "idle").
+		Find(&expiredStates).Error
+	
+	if err != nil {
+		rm.logger.Error("查询过期会话失败", zap.Error(err))
+		return fmt.Errorf("查询过期会话失败: %w", err)
+	}
+	
+	if len(expiredStates) == 0 {
+		rm.logger.Info("没有需要清理的过期会话")
+		return nil
+	}
+	
+	rm.logger.Info("找到过期会话",
+		zap.Int("count", len(expiredStates)))
+	
+	// 批量处理过期会话
+	successCount := 0
+	failCount := 0
+	refundCount := 0
+	
+	for _, state := range expiredStates {
+		// 反序列化状态数据
+		var stateData StateMachineData
+		if err := json.Unmarshal([]byte(state.StateData), &stateData); err != nil {
+			rm.logger.Error("反序列化状态数据失败",
+				zap.String("session_id", state.SessionID),
+				zap.Error(err))
+			failCount++
+			continue
+		}
+		
+		// 根据状态决定清理策略
+		switch stateData.CurrentState {
+		case StateReady:
+			// 准备状态需要退款
+			if stateData.BetAmount > 0 {
+				rm.logger.Info("清理准备状态会话，执行退款",
+					zap.String("session_id", state.SessionID),
+					zap.Uint("user_id", state.UserID),
+					zap.Int64("bet_amount", stateData.BetAmount))
+				
+				// 执行退款
+				err := rm.performRefund(ctx, state.SessionID, state.UserID, stateData.BetAmount, "expired_cleanup")
+				if err != nil {
+					rm.logger.Error("清理时退款失败",
+						zap.String("session_id", state.SessionID),
+						zap.Error(err))
+					failCount++
+					continue
+				}
+				refundCount++
+			}
+			
+		case StateSettlement:
+			// 结算状态需要检查是否已完成结算
+			if stateData.WinAmount > 0 {
+				// 检查是否已有结算记录
+				var existingTransaction models.Transaction
+				err := rm.db.WithContext(ctx).
+					Where("ref_id = ? AND ref_type = ? AND type = ? AND status = ?",
+						state.SessionID, "game_session", "win", "success").
+					First(&existingTransaction).Error
+				
+				if err == gorm.ErrRecordNotFound {
+					// 未结算，执行结算
+					rm.logger.Info("清理结算状态会话，执行结算",
+						zap.String("session_id", state.SessionID),
+						zap.Uint("user_id", state.UserID),
+						zap.Int64("win_amount", stateData.WinAmount))
+					
+					err := rm.performSettlement(ctx, state.SessionID, state.UserID, stateData.WinAmount)
+					if err != nil {
+						rm.logger.Error("清理时结算失败",
+							zap.String("session_id", state.SessionID),
+							zap.Error(err))
+						failCount++
+						continue
+					}
+				}
+			}
+		}
+		
+		// 删除过期会话
+		if err := rm.persister.Delete(ctx, state.SessionID); err != nil {
+			rm.logger.Error("删除会话失败",
+				zap.String("session_id", state.SessionID),
+				zap.Error(err))
+			failCount++
+			continue
+		}
+		
+		// 从数据库删除状态记录
+		if err := rm.db.WithContext(ctx).Delete(&state).Error; err != nil {
+			rm.logger.Error("删除数据库记录失败",
+				zap.String("session_id", state.SessionID),
+				zap.Error(err))
+			// 不计入失败，因为内存已清理
+		}
+		
+		successCount++
+	}
+	
+	rm.logger.Info("清理过期会话完成",
+		zap.Int("total", len(expiredStates)),
+		zap.Int("success", successCount),
+		zap.Int("failed", failCount),
+		zap.Int("refunded", refundCount))
 	
 	return nil
+}
+
+// performRefund 执行退款操作（辅助方法）
+func (rm *RecoveryManager) performRefund(ctx context.Context, sessionID string, userID uint, amount int64, reason string) error {
+	return rm.db.Transaction(func(tx *gorm.DB) error {
+		walletRepo := repository.NewWalletRepository(tx)
+		
+		// 退还金额
+		if err := walletRepo.AddBalance(ctx, userID, amount); err != nil {
+			return fmt.Errorf("退款失败: %w", err)
+		}
+		
+		// 获取钱包信息
+		wallet, err := walletRepo.FindByUserID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("获取钱包信息失败: %w", err)
+		}
+		
+		// 创建退款记录
+		transaction := &models.Transaction{
+			UserID:        userID,
+			OrderNo:       fmt.Sprintf("REFUND_%s_%d", sessionID, time.Now().Unix()),
+			Type:          "refund",
+			SubType:       reason,
+			Amount:        amount,
+			BeforeBalance: wallet.Balance - amount,
+			AfterBalance:  wallet.Balance,
+			Currency:      "CNY",
+			Status:        "success",
+			RefID:         sessionID,
+			RefType:       "game_session",
+			Description:   "游戏会话过期退款",
+			Remark:        fmt.Sprintf("会话 %s 过期清理时退款", sessionID),
+		}
+		processedAt := time.Now()
+		transaction.ProcessedAt = &processedAt
+		
+		return tx.Create(transaction).Error
+	})
+}
+
+// performSettlement 执行结算操作（辅助方法）
+func (rm *RecoveryManager) performSettlement(ctx context.Context, sessionID string, userID uint, winAmount int64) error {
+	return rm.db.Transaction(func(tx *gorm.DB) error {
+		walletRepo := repository.NewWalletRepository(tx)
+		
+		// 添加中奖金额
+		if err := walletRepo.AddBalance(ctx, userID, winAmount); err != nil {
+			return fmt.Errorf("添加中奖金额失败: %w", err)
+		}
+		
+		// 获取钱包信息
+		wallet, err := walletRepo.FindByUserID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("获取钱包信息失败: %w", err)
+		}
+		
+		// 创建中奖记录
+		transaction := &models.Transaction{
+			UserID:        userID,
+			OrderNo:       fmt.Sprintf("WIN_%s_%d", sessionID, time.Now().Unix()),
+			Type:          "win",
+			SubType:       "expired_settlement",
+			Amount:        winAmount,
+			BeforeBalance: wallet.Balance - winAmount,
+			AfterBalance:  wallet.Balance,
+			Currency:      "CNY",
+			Status:        "success",
+			RefID:         sessionID,
+			RefType:       "game_session",
+			Description:   "游戏中奖（过期结算）",
+			Remark:        fmt.Sprintf("会话 %s 过期清理时结算", sessionID),
+		}
+		processedAt := time.Now()
+		transaction.ProcessedAt = &processedAt
+		
+		if err := tx.Create(transaction).Error; err != nil {
+			return fmt.Errorf("创建中奖记录失败: %w", err)
+		}
+		
+		// 更新钱包统计
+		if err := walletRepo.UpdateStatistics(ctx, userID, "total_win", winAmount); err != nil {
+			rm.logger.Warn("更新钱包统计失败",
+				zap.Uint("user_id", userID),
+				zap.Error(err))
+		}
+		
+		return nil
+	})
 }
 
 // RecoveryMiddleware 恢复中间件（用于API层）

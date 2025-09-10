@@ -54,7 +54,7 @@ type SessionConfig struct {
 // NewSessionManager 创建会话管理器
 func NewSessionManager(config *SessionConfig) *SessionManager {
 	persister := NewDatabaseStatePersister(config.DB)
-	recoveryManager := NewRecoveryManager(config.Logger, persister, config.SessionTimeout)
+	recoveryManager := NewRecoveryManager(config.Logger, persister, config.DB, config.SessionTimeout)
 	
 	return &SessionManager{
 		sessions:        make(map[string]*GameSession),
