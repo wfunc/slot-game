@@ -1,0 +1,195 @@
+{
+  "id": "mahjong",
+  "name": "麻将来了",
+  "description": "1024线消除式麻将老虎机",
+  "symbol_map": {
+    "0": {
+      "id": 0,
+      "name": "一万",
+      "image_url": "/images/mahjong/1w.png",
+      "rarity": 0,
+      "value": "common"
+    },
+    "1": {
+      "id": 1,
+      "name": "二万",
+      "image_url": "/images/mahjong/2w.png",
+      "rarity": 0,
+      "value": "common"
+    },
+    "2": {
+      "id": 2,
+      "name": "三万",
+      "image_url": "/images/mahjong/3w.png",
+      "rarity": 0,
+      "value": "common"
+    },
+    "3": {
+      "id": 3,
+      "name": "一筒",
+      "image_url": "/images/mahjong/1t.png",
+      "rarity": 1,
+      "value": "uncommon"
+    },
+    "4": {
+      "id": 4,
+      "name": "二筒",
+      "image_url": "/images/mahjong/2t.png",
+      "rarity": 1,
+      "value": "uncommon"
+    },
+    "5": {
+      "id": 5,
+      "name": "三筒",
+      "image_url": "/images/mahjong/3t.png",
+      "rarity": 1,
+      "value": "uncommon"
+    },
+    "6": {
+      "id": 6,
+      "name": "一条",
+      "image_url": "/images/mahjong/1s.png",
+      "rarity": 2,
+      "value": "rare"
+    },
+    "7": {
+      "id": 7,
+      "name": "发财",
+      "image_url": "/images/mahjong/fa.png",
+      "rarity": 3,
+      "value": "epic"
+    },
+    "8": {
+      "id": 8,
+      "name": "红中",
+      "image_url": "/images/mahjong/red.png",
+      "rarity": 3,
+      "value": "epic"
+    },
+    "9": {
+      "id": 9,
+      "name": "白板",
+      "image_url": "/images/mahjong/bai.png",
+      "rarity": 4,
+      "value": "legendary"
+    }
+  },
+  "background": {
+    "image_url": "/images/mahjong/table_bg.jpg",
+    "music_url": "/sounds/mahjong/ambient.mp3",
+    "music_volume": 0.3
+  },
+  "animations": {
+    "win": [
+      {
+        "type": "cascade_remove",
+        "duration": 800,
+        "sequence": [
+          {"action": "highlight", "duration": 200},
+          {"action": "shrink", "duration": 300},
+          {"action": "fade_out", "duration": 300}
+        ]
+      }
+    ],
+    "cascade": [
+      {
+        "type": "gravity_fall",
+        "duration": 600,
+        "sequence": [
+          {"action": "drop", "duration": 400},
+          {"action": "bounce", "duration": 200}
+        ]
+      }
+    ],
+    "multiplier": [
+      {
+        "type": "multiplier_popup",
+        "duration": 1000,
+        "sequence": [
+          {"action": "scale_up", "duration": 300},
+          {"action": "glow", "duration": 400},
+          {"action": "fade", "duration": 300}
+        ]
+      }
+    ]
+  },
+  "sounds": {
+    "match": {
+      "type": "match_sound",
+      "file_url": "/sounds/mahjong/tile_match.wav",
+      "volume": 0.8,
+      "loop": false
+    },
+    "cascade": {
+      "type": "cascade_sound", 
+      "file_url": "/sounds/mahjong/tile_fall.wav",
+      "volume": 0.6,
+      "loop": false
+    },
+    "big_win": {
+      "type": "big_win_sound",
+      "file_url": "/sounds/mahjong/mahjong_win.wav", 
+      "volume": 1.0,
+      "loop": false
+    },
+    "multiplier": {
+      "type": "multiplier_sound",
+      "file_url": "/sounds/mahjong/multiplier.wav",
+      "volume": 0.9,
+      "loop": false
+    }
+  },
+  "effects": {
+    "cascade_glow": {
+      "type": "particle",
+      "intensity": 0.8,
+      "color": "#FFD700",
+      "duration": 1000
+    },
+    "match_spark": {
+      "type": "spark",
+      "intensity": 1.0,
+      "color": "#FF6B6B", 
+      "duration": 500
+    }
+  },
+  "ui_elements": {
+    "cascade_counter": {
+      "position": "top_right",
+      "style": "chinese_calligraphy",
+      "color": "#B8860B"
+    },
+    "multiplier_display": {
+      "position": "center",
+      "style": "golden_text",
+      "animation": "pulse"
+    },
+    "win_text": {
+      "font": "chinese_traditional",
+      "messages": {
+        "small_win": "小胡！",
+        "big_win": "大胡！",
+        "mega_win": "自摸！",
+        "cascade": "连庄！"
+      }
+    }
+  },
+  "game_rules": {
+    "min_match": 3,
+    "max_cascades": 10,
+    "special_combinations": {
+      "all_honor": {
+        "symbols": [7, 8, 9],
+        "min_count": 9,
+        "bonus_multiplier": 20.0,
+        "name": "字一色"
+      },
+      "mixed_suits": {
+        "symbols": [0, 1, 2, 3, 4, 5, 6],
+        "min_count": 15,
+        "bonus_multiplier": 10.0,
+        "name": "混一色"
+      }
+    }
+  }
+}

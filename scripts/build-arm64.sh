@@ -669,11 +669,7 @@ if [ -f "scripts/chromium-optimized.sh" ]; then
     echo -e "${GREEN}✓ 已复制 Chromium 优化配置脚本${NC}"
 fi
 
-# 复制测试脚本
-if [ -f "scripts/test-chromium-modes.sh" ]; then
-    cp scripts/test-chromium-modes.sh $RELEASE_DIR/
-    echo -e "${GREEN}✓ 已复制 GPU 模式测试脚本${NC}"
-fi
+
 
 # 设置脚本权限
 chmod +x $RELEASE_DIR/*.sh

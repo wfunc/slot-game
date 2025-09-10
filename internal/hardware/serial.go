@@ -1,7 +1,6 @@
 package hardware
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -525,9 +524,28 @@ func (s *SerialControllerImpl) sendCommandWithResponse(cmd []byte, timeout time.
 	defer s.mu.Unlock()
 	
 	buffer := make([]byte, 256)
-	s.port.(*serial.Port).ReadTimeout = timeout
+	// 设置读取超时（使用 goroutine 和 channel 实现超时）
+	readChan := make(chan struct {
+		n   int
+		err error
+	}, 1)
 	
-	n, err := s.port.Read(buffer)
+	go func() {
+		n, err := s.port.Read(buffer)
+		readChan <- struct {
+			n   int
+			err error
+		}{n, err}
+	}()
+	
+	var n int
+	var err error
+	select {
+	case result := <-readChan:
+		n, err = result.n, result.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("read timeout after %v", timeout)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
