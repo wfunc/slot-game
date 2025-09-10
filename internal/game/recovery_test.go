@@ -24,8 +24,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	err = db.AutoMigrate(
 		&models.User{},
 		&models.Wallet{},
+		&models.WalletTransaction{},
 		&models.Transaction{},
 		&models.GameState{},
+		&models.GameRecord{},
 	)
 	require.NoError(t, err)
 	

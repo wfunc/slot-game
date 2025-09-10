@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wfunc/slot-game/internal/game/slot"
+	"github.com/wfunc/slot-game/internal/hardware"
 	"github.com/wfunc/slot-game/internal/models"
 	"github.com/wfunc/slot-game/internal/repository"
 	"go.uber.org/zap"
@@ -15,20 +16,22 @@ import (
 
 // GameService 游戏服务（业务逻辑层）
 type GameService struct {
-	sessionManager *SessionManager
-	userRepo       repository.UserRepository
-	walletRepo     repository.WalletRepository
-	gameResultRepo repository.GameResultRepository
-	logger         *zap.Logger
-	db             *gorm.DB
+	sessionManager   *SessionManager
+	userRepo         repository.UserRepository
+	walletRepo       repository.WalletRepository
+	gameResultRepo   repository.GameResultRepository
+	serialController hardware.SerialController
+	logger           *zap.Logger
+	db               *gorm.DB
 }
 
 // GameServiceConfig 游戏服务配置
 type GameServiceConfig struct {
-	DB             *gorm.DB
-	Logger         *zap.Logger
-	SessionTimeout time.Duration
-	MaxSessions    int
+	DB               *gorm.DB
+	Logger           *zap.Logger
+	SessionTimeout   time.Duration
+	MaxSessions      int
+	SerialController hardware.SerialController // 可选的串口控制器
 }
 
 // NewGameService 创建游戏服务
@@ -41,12 +44,13 @@ func NewGameService(config *GameServiceConfig) *GameService {
 	}
 	
 	return &GameService{
-		sessionManager: NewSessionManager(sessionConfig),
-		userRepo:       repository.NewUserRepository(config.DB),
-		walletRepo:     repository.NewWalletRepository(config.DB),
-		gameResultRepo: repository.NewGameResultRepository(config.DB),
-		logger:         config.Logger,
-		db:             config.DB,
+		sessionManager:   NewSessionManager(sessionConfig),
+		userRepo:         repository.NewUserRepository(config.DB),
+		walletRepo:       repository.NewWalletRepository(config.DB),
+		gameResultRepo:   repository.NewGameResultRepository(config.DB),
+		serialController: config.SerialController,
+		logger:           config.Logger,
+		db:               config.DB,
 	}
 }
 
@@ -179,6 +183,39 @@ func (s *GameService) Spin(ctx context.Context, sessionID string) (*SpinResponse
 		}
 		
 		tx.Commit()
+		
+		// 触发硬件出币（如果串口控制器可用）
+		if s.serialController != nil {
+			// 计算出币数量（每100分出1个币）
+			coinCount := int(result.TotalPayout / 100)
+			if coinCount > 0 {
+				// 异步触发出币，避免阻塞游戏流程
+				go func() {
+					// 根据币数调整推币力度和持续时间
+					// 力度范围: 50-100, 持续时间: 每个币500ms
+					force := 50 + (coinCount * 10)
+					if force > 100 {
+						force = 100
+					}
+					duration := time.Duration(coinCount) * 500 * time.Millisecond
+					
+					if err := s.serialController.PushCoin(force, duration); err != nil {
+						s.logger.Error("硬件出币失败",
+							zap.String("session_id", sessionID),
+							zap.Int("coin_count", coinCount),
+							zap.Int("force", force),
+							zap.Duration("duration", duration),
+							zap.Error(err))
+					} else {
+						s.logger.Info("硬件出币成功",
+							zap.String("session_id", sessionID),
+							zap.Int("coin_count", coinCount),
+							zap.Int("force", force),
+							zap.Duration("duration", duration))
+					}
+				}()
+			}
+		}
 	}
 	
 	// 保存游戏记录
