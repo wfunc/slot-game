@@ -61,6 +61,7 @@ type WebSocketConfig struct {
 
 // SerialConfig 串口配置
 type SerialConfig struct {
+	Enabled       bool          `mapstructure:"enabled"`
 	Port          string        `mapstructure:"port"`
 	BaudRate      int           `mapstructure:"baud_rate"`
 	DataBits      int           `mapstructure:"data_bits"`

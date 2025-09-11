@@ -16,6 +16,8 @@ import (
 	"github.com/wfunc/slot-game/internal/config"
 	"github.com/wfunc/slot-game/internal/database"
 	"github.com/wfunc/slot-game/internal/errors"
+	"github.com/wfunc/slot-game/internal/game"
+	"github.com/wfunc/slot-game/internal/hardware"
 	"github.com/wfunc/slot-game/internal/logger"
 	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
@@ -34,13 +36,12 @@ type Server struct {
 	logger   *zap.Logger
 	
 	// 服务组件
-	router       *api.Router
-	httpServer   *http.Server
-	// gameEngine    *game.Engine
-	// wsServer      *websocket.Server
-	// serialManager *hardware.SerialManager
+	router           *api.Router
+	httpServer       *http.Server
+	recoveryManager  *game.RecoveryManager
+	serialController hardware.SerialController
+	cleanupTicker    *time.Ticker
 	// mqttClient    *mqtt.Client
-	// database      *gorm.DB
 	
 	// 关闭控制
 	shutdownCh chan struct{}
@@ -169,15 +170,18 @@ func (s *Server) initComponents() error {
 		return err
 	}
 	
-	// TODO: 初始化游戏引擎
-	// if err := s.initGameEngine(); err != nil {
-	//     return err
-	// }
+	// 初始化游戏引擎和恢复管理器
+	if err := s.initGameEngine(); err != nil {
+		return err
+	}
 	
-	// TODO: 初始化串口管理器
-	// if err := s.initSerialManager(); err != nil {
-	//     return err
-	// }
+	// 初始化串口管理器（可选）
+	if s.cfg.Serial.Enabled {
+		if err := s.initSerialManager(); err != nil {
+			s.logger.Warn("串口管理器初始化失败，使用模拟模式", zap.Error(err))
+			// 不影响主流程，继续运行
+		}
+	}
 	
 	// TODO: 初始化MQTT客户端
 	// if s.cfg.MQTT.Enabled {
@@ -245,6 +249,115 @@ func (s *Server) initHTTPRouter() error {
 	}
 	
 	s.logger.Info("HTTP路由初始化完成")
+	return nil
+}
+
+// initGameEngine 初始化游戏引擎和恢复管理器
+func (s *Server) initGameEngine() error {
+	s.logger.Info("初始化游戏引擎和恢复管理器...")
+	
+	// 获取数据库连接
+	db := database.GetDB()
+	if db == nil {
+		return errors.New(errors.ErrDatabaseConnect, "数据库连接不可用")
+	}
+	
+	// 创建持久化器（使用数据库持久化）
+	persister := game.NewDatabaseStatePersister(db)
+	
+	// 创建恢复管理器
+	s.recoveryManager = game.NewRecoveryManager(
+		s.logger,
+		persister,
+		db,
+		30*time.Minute, // 会话超时时间
+	)
+	
+	// 启动定时清理任务（每30分钟清理一次过期会话）
+	s.cleanupTicker = time.NewTicker(30 * time.Minute)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.logger.Info("启动会话清理定时任务", zap.Duration("interval", 30*time.Minute))
+		
+		for {
+			select {
+			case <-s.cleanupTicker.C:
+				s.logger.Info("开始执行会话清理任务")
+				if err := s.recoveryManager.CleanupExpiredSessions(s.ctx); err != nil {
+					s.logger.Error("清理过期会话失败", zap.Error(err))
+				}
+			case <-s.ctx.Done():
+				s.logger.Info("停止会话清理任务")
+				return
+			}
+		}
+	}()
+	
+	// 立即执行一次清理，清除启动前的过期会话
+	go func() {
+		time.Sleep(5 * time.Second) // 等待系统稳定
+		s.logger.Info("执行启动清理任务")
+		if err := s.recoveryManager.CleanupExpiredSessions(context.Background()); err != nil {
+			s.logger.Error("启动清理失败", zap.Error(err))
+		}
+	}()
+	
+	s.logger.Info("游戏引擎和恢复管理器初始化完成")
+	return nil
+}
+
+// initSerialManager 初始化串口管理器
+func (s *Server) initSerialManager() error {
+	s.logger.Info("初始化串口管理器...")
+	
+	// 检查串口配置
+	if !s.cfg.Serial.Enabled {
+		s.logger.Info("串口功能未启用，使用模拟控制器")
+		s.serialController = hardware.NewMockSerialController()
+		return nil
+	}
+	
+	// 创建串口配置
+	serialConfig := &hardware.SerialConfig{
+		Port:          s.cfg.Serial.Port,
+		BaudRate:      s.cfg.Serial.BaudRate,
+		DataBits:      8,
+		StopBits:      1,
+		Parity:        "N",
+		ReadTimeout:   100 * time.Millisecond,
+		WriteTimeout:  100 * time.Millisecond,
+		RetryTimes:    3,
+		RetryInterval: 100 * time.Millisecond,
+	}
+	
+	// 创建串口控制器
+	s.serialController = hardware.NewSerialController(serialConfig)
+	
+	// 连接串口
+	if err := s.serialController.Connect(); err != nil {
+		s.logger.Error("串口连接失败，切换到模拟模式", 
+			zap.String("port", s.cfg.Serial.Port),
+			zap.Error(err))
+		// 使用模拟控制器作为降级方案
+		s.serialController = hardware.NewMockSerialController()
+		if err := s.serialController.Connect(); err != nil {
+			return errors.Wrap(err, errors.ErrUnknown, "模拟控制器连接失败")
+		}
+	}
+	
+	// 设置状态回调
+	s.serialController.SetStatusCallback(func(status *hardware.DeviceStatus) {
+		if status.ErrorCount > 10 {
+			s.logger.Warn("串口错误次数过多", 
+				zap.Int("error_count", status.ErrorCount),
+				zap.String("last_command", status.LastCommand))
+		}
+	})
+	
+	s.logger.Info("串口管理器初始化完成", 
+		zap.Bool("connected", s.serialController.IsConnected()))
+	
 	return nil
 }
 
@@ -348,15 +461,25 @@ func (s *Server) Shutdown() error {
 func (s *Server) closeComponents() error {
 	s.logger.Info("关闭组件...")
 	
+	// 停止定时清理任务
+	if s.cleanupTicker != nil {
+		s.cleanupTicker.Stop()
+		s.logger.Info("定时清理任务已停止")
+	}
+	
+	// 关闭串口连接
+	if s.serialController != nil {
+		if err := s.serialController.Disconnect(); err != nil {
+			s.logger.Error("关闭串口失败", zap.Error(err))
+		} else {
+			s.logger.Info("串口连接已关闭")
+		}
+	}
+	
 	// 关闭数据库连接
 	if err := database.Close(); err != nil {
 		s.logger.Error("关闭数据库失败", zap.Error(err))
 	}
-	
-	// TODO: 关闭串口
-	// if s.serialManager != nil {
-	//     s.serialManager.Close()
-	// }
 	
 	// TODO: 关闭MQTT连接
 	// if s.mqttClient != nil {

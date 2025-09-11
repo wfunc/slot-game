@@ -62,7 +62,8 @@ websocket:
 
 # 串口配置
 serial:
-  port: "/dev/ttyUSB0"
+  enabled: false          # 是否启用串口（false时使用模拟控制器）
+  port: "/dev/ttyUSB0"    # Linux系统串口，Windows使用COM1等
   baud_rate: 115200
   data_bits: 8
   stop_bits: 1
