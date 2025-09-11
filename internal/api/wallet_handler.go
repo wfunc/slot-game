@@ -69,9 +69,9 @@ type WithdrawResponse struct {
 // TransactionListResponse 交易列表响应
 type TransactionListResponse struct {
 	Transactions []TransactionInfo `json:"transactions"`
-	Total        int64            `json:"total"`
-	Page         int              `json:"page"`
-	PageSize     int              `json:"page_size"`
+	Total        int64             `json:"total"`
+	Page         int               `json:"page"`
+	PageSize     int               `json:"page_size"`
 }
 
 // TransactionInfo 交易信息
@@ -110,10 +110,10 @@ func (h *WalletHandler) GetBalance(c *gin.Context) {
 		// 如果钱包不存在，创建一个新钱包
 		if err.Error() == "钱包不存在" {
 			wallet = &models.Wallet{
-				UserID:   userID,
-				Balance:  10000, // 初始赠送10000金币
+				UserID:  userID,
+				Balance: 10000, // 初始赠送10000金币
 			}
-			if err := h.walletRepo.Create(c.Request.Context(), wallet); err != nil {
+			if err = h.walletRepo.Create(c.Request.Context(), wallet); err != nil {
 				h.logger.Error("创建钱包失败", zap.Error(err))
 				c.JSON(500, gin.H{"error": "创建钱包失败"})
 				return
@@ -400,7 +400,7 @@ func (h *WalletHandler) GetTransactions(c *gin.Context) {
 	// 查询交易记录
 	var transactions []*models.Transaction
 	var err error
-	
+
 	if txType != "" {
 		transactions, err = h.transactionRepo.FindByType(c.Request.Context(), txType, pagination)
 	} else {
@@ -484,12 +484,12 @@ func (h *WalletHandler) GetStatistics(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"balance":       wallet.Balance,
-		"total_deposit": wallet.TotalDeposit,
+		"balance":        wallet.Balance,
+		"total_deposit":  wallet.TotalDeposit,
 		"total_withdraw": wallet.TotalWithdraw,
-		"total_bet":     wallet.TotalBet,
-		"total_win":     wallet.TotalWin,
-		"daily_stats":   stats,
-		"date":          date.Format("2006-01-02"),
+		"total_bet":      wallet.TotalBet,
+		"total_win":      wallet.TotalWin,
+		"daily_stats":    stats,
+		"date":           date.Format("2006-01-02"),
 	})
 }
