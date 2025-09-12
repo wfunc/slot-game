@@ -138,6 +138,9 @@ const (
 	ErrorChecksum    byte = 0x05 // 校验失败
 	ErrorOutOfRange  byte = 0x06 // 超出范围
 	ErrorNoResource  byte = 0x07 // 资源不足
+	
+	// 补充的故障码（用于传感器事件）
+	FaultNoResource  byte = 0x09 // 资源不足（币/彩票）
 )
 
 // Frame 数据帧结构

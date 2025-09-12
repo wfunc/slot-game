@@ -2,7 +2,9 @@ package hardware
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -419,9 +421,181 @@ func (c *STM32Controller) handleSensorEvent(frame *Frame) {
 	// 发送ACK确认
 	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
 	
-	c.logger.Info("Sensor event",
-		zap.Uint8("type", sensorType),
-		zap.Uint16("value", value))
+	// 根据传感器类型处理不同事件
+	switch sensorType {
+	case SensorCoinLevel:
+		c.handleCoinLevelSensor(value)
+	case SensorTicketLevel:
+		c.handleTicketLevelSensor(value)
+	case SensorTemperature:
+		c.handleTemperatureSensor(value)
+	case SensorVibration:
+		c.handleVibrationSensor(value)
+	case SensorDoor:
+		c.handleDoorSensor(value)
+	default:
+		c.logger.Warn("Unknown sensor type",
+			zap.Uint8("type", sensorType),
+			zap.Uint16("value", value))
+	}
+}
+
+// handleCoinLevelSensor 处理币仓余量传感器
+func (c *STM32Controller) handleCoinLevelSensor(value uint16) {
+	c.logger.Info("Coin level sensor triggered",
+		zap.Uint16("level", value))
+	
+	// 币仓余量报警阈值
+	const lowLevelThreshold = 10
+	const criticalLevelThreshold = 5
+	
+	if value <= criticalLevelThreshold {
+		c.logger.Error("CRITICAL: Coin hopper almost empty",
+			zap.Uint16("remaining", value))
+		// 触发紧急补币流程
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultNoResource,
+				Level:     FaultLevelCritical,
+				ExtraInfo: []byte{SensorCoinLevel, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	} else if value <= lowLevelThreshold {
+		c.logger.Warn("Low coin level detected",
+			zap.Uint16("remaining", value))
+		// 触发预警
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultNoResource,
+				Level:     FaultLevelWarning,
+				ExtraInfo: []byte{SensorCoinLevel, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	}
+}
+
+// handleTicketLevelSensor 处理彩票余量传感器
+func (c *STM32Controller) handleTicketLevelSensor(value uint16) {
+	c.logger.Info("Ticket level sensor triggered",
+		zap.Uint16("level", value))
+	
+	// 彩票余量报警阈值
+	const lowLevelThreshold = 50
+	const criticalLevelThreshold = 10
+	
+	if value <= criticalLevelThreshold {
+		c.logger.Error("CRITICAL: Ticket paper almost empty",
+			zap.Uint16("remaining", value))
+		// 触发紧急换纸流程
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultTicketNoPaper,
+				Level:     FaultLevelCritical,
+				ExtraInfo: []byte{SensorTicketLevel, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	} else if value <= lowLevelThreshold {
+		c.logger.Warn("Low ticket paper level detected",
+			zap.Uint16("remaining", value))
+		// 触发预警
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultTicketNoPaper,
+				Level:     FaultLevelWarning,
+				ExtraInfo: []byte{SensorTicketLevel, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	}
+}
+
+// handleTemperatureSensor 处理温度传感器
+func (c *STM32Controller) handleTemperatureSensor(value uint16) {
+	// 温度值为实际温度*10（如250表示25.0°C）
+	temperature := float64(value) / 10.0
+	c.logger.Info("Temperature sensor reading",
+		zap.Float64("temperature", temperature))
+	
+	const warningTemp = 45.0  // 45°C警告
+	const criticalTemp = 55.0 // 55°C严重
+	
+	if temperature >= criticalTemp {
+		c.logger.Error("CRITICAL: Over temperature detected",
+			zap.Float64("temperature", temperature))
+		// 触发过热保护
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultOverTemperature,
+				Level:     FaultLevelCritical,
+				ExtraInfo: []byte{SensorTemperature, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+		// 自动停止推币电机以降温
+		c.StopPushing()
+	} else if temperature >= warningTemp {
+		c.logger.Warn("High temperature warning",
+			zap.Float64("temperature", temperature))
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultOverTemperature,
+				Level:     FaultLevelWarning,
+				ExtraInfo: []byte{SensorTemperature, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	}
+}
+
+// handleVibrationSensor 处理震动传感器
+func (c *STM32Controller) handleVibrationSensor(value uint16) {
+	c.logger.Info("Vibration sensor triggered",
+		zap.Uint16("intensity", value))
+	
+	const abnormalVibrationThreshold = 500 // 异常震动阈值
+	
+	if value >= abnormalVibrationThreshold {
+		c.logger.Warn("Abnormal vibration detected",
+			zap.Uint16("intensity", value))
+		// 可能有人在撞击机器或机器故障
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultSensorAbnormal,
+				Level:     FaultLevelWarning,
+				ExtraInfo: []byte{SensorVibration, byte(value >> 8), byte(value & 0xFF)},
+			})
+		}
+	}
+}
+
+// handleDoorSensor 处理门开关传感器
+func (c *STM32Controller) handleDoorSensor(value uint16) {
+	isOpen := value > 0
+	c.logger.Info("Door sensor status",
+		zap.Bool("is_open", isOpen))
+	
+	if isOpen {
+		c.logger.Warn("Machine door opened")
+		// 门被打开，可能是维护或非法访问
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultSensorAbnormal,
+				Level:     FaultLevelWarning,
+				ExtraInfo: []byte{SensorDoor, 0x01, 0x00}, // 0x01表示门开
+			})
+		}
+		// 暂停游戏
+		if c.gameLogic != nil && c.gameLogic.HasCredits() {
+			c.logger.Info("Pausing game due to door open")
+		}
+	} else {
+		c.logger.Info("Machine door closed")
+		// 门已关闭，恢复正常
+		if c.onFaultReport != nil {
+			c.onFaultReport(&FaultEvent{
+				FaultCode: FaultSensorAbnormal,
+				Level:     FaultLevelInfo,
+				ExtraInfo: []byte{SensorDoor, 0x00, 0x00}, // 0x00表示门关
+			})
+		}
+	}
 }
 
 // handleStatusReport 处理状态上报
@@ -551,8 +725,80 @@ func (c *STM32Controller) sendACKResponse(origSeq uint16, origCmd byte, status b
 
 // saveStatistics 保存统计数据（用于断电保护）
 func (c *STM32Controller) saveStatistics() {
-	// TODO: 实现数据持久化到数据库或文件
-	c.logger.Debug("Statistics saved")
+	c.statsMu.RLock()
+	stats := c.stats
+	stats.Timestamp = time.Now()
+	c.statsMu.RUnlock()
+	
+	// 计算回币率
+	if stats.CoinsInserted > 0 {
+		totalReturned := stats.CoinsReturnedFront + stats.CoinsReturnedLeft + stats.CoinsReturnedRight
+		stats.ReturnRate = float64(totalReturned) / float64(stats.CoinsInserted)
+	}
+	
+	// 保存到文件（JSON格式）
+	filename := fmt.Sprintf("data/statistics_%s.json", time.Now().Format("20060102"))
+	if err := c.saveStatsToFile(filename, &stats); err != nil {
+		c.logger.Error("Failed to save statistics to file", zap.Error(err))
+	}
+	
+	c.logger.Info("Statistics saved",
+		zap.String("file", filename),
+		zap.Uint16("coins_inserted", stats.CoinsInserted),
+		zap.Uint16("coins_dispensed", stats.CoinsDispensed),
+		zap.Float64("return_rate", stats.ReturnRate))
+}
+
+// saveStatsToFile 保存统计数据到文件
+func (c *STM32Controller) saveStatsToFile(filename string, stats *CoinStatistics) error {
+	// 确保目录存在
+	if err := os.MkdirAll("data", 0755); err != nil {
+		return fmt.Errorf("create data directory failed: %w", err)
+	}
+	
+	// 将统计数据转换为JSON
+	data, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal statistics failed: %w", err)
+	}
+	
+	// 写入文件
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return fmt.Errorf("write statistics file failed: %w", err)
+	}
+	
+	return nil
+}
+
+// loadStatistics 加载统计数据
+func (c *STM32Controller) loadStatistics() error {
+	// 查找今天的统计文件
+	filename := fmt.Sprintf("data/statistics_%s.json", time.Now().Format("20060102"))
+	
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.logger.Info("No existing statistics file, starting fresh")
+			return nil
+		}
+		return fmt.Errorf("read statistics file failed: %w", err)
+	}
+	
+	var stats CoinStatistics
+	if err := json.Unmarshal(data, &stats); err != nil {
+		return fmt.Errorf("unmarshal statistics failed: %w", err)
+	}
+	
+	c.statsMu.Lock()
+	c.stats = stats
+	c.statsMu.Unlock()
+	
+	c.logger.Info("Statistics loaded",
+		zap.String("file", filename),
+		zap.Uint16("coins_inserted", stats.CoinsInserted),
+		zap.Uint16("coins_dispensed", stats.CoinsDispensed))
+	
+	return nil
 }
 
 // GetStatistics 获取统计数据

@@ -157,6 +157,12 @@ func (c *STM32Controller) Connect() error {
 	c.port = port
 	c.connected = true
 	
+	// 加载历史统计数据
+	if err := c.loadStatistics(); err != nil {
+		c.logger.Warn("Failed to load statistics", zap.Error(err))
+		// 不影响连接，继续执行
+	}
+	
 	// 启动后台任务
 	go c.readLoop()
 	go c.eventLoop()
@@ -180,6 +186,9 @@ func (c *STM32Controller) Disconnect() error {
 	
 	// 停止后台任务
 	close(c.stopCh)
+	
+	// 保存统计数据
+	c.saveStatistics()
 	
 	// 关闭串口
 	if c.port != nil {
