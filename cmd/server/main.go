@@ -314,25 +314,24 @@ func (s *Server) initSerialManager() error {
 	// 检查串口配置
 	if !s.cfg.Serial.Enabled {
 		s.logger.Info("串口功能未启用，使用模拟控制器")
-		s.serialController = hardware.NewMockSerialController()
+		s.serialController = hardware.NewMockController()
 		return nil
 	}
 	
 	// 创建串口配置
-	serialConfig := &hardware.SerialConfig{
-		Port:          s.cfg.Serial.Port,
-		BaudRate:      s.cfg.Serial.BaudRate,
-		DataBits:      8,
-		StopBits:      1,
-		Parity:        "N",
-		ReadTimeout:   100 * time.Millisecond,
-		WriteTimeout:  100 * time.Millisecond,
-		RetryTimes:    3,
-		RetryInterval: 100 * time.Millisecond,
+	config := &hardware.STM32Config{
+		Port:              s.cfg.Serial.Port,
+		BaudRate:          s.cfg.Serial.BaudRate,
+		DataBits:          8,
+		StopBits:          2,
+		ReadTimeout:       100 * time.Millisecond,
+		WriteTimeout:      100 * time.Millisecond,
+		HeartbeatInterval: 30 * time.Second,
+		RetryCount:        3,
 	}
 	
-	// 创建串口控制器
-	s.serialController = hardware.NewSerialController(serialConfig)
+	// 创建串口控制器 (传入 nil 作为 gameLogic，实际游戏逻辑在 gameService 中处理)
+	s.serialController = hardware.NewSTM32Controller(config, nil)
 	
 	// 连接串口
 	if err := s.serialController.Connect(); err != nil {
@@ -340,19 +339,22 @@ func (s *Server) initSerialManager() error {
 			zap.String("port", s.cfg.Serial.Port),
 			zap.Error(err))
 		// 使用模拟控制器作为降级方案
-		s.serialController = hardware.NewMockSerialController()
+		s.serialController = hardware.NewMockController()
 		if err := s.serialController.Connect(); err != nil {
 			return errors.Wrap(err, errors.ErrUnknown, "模拟控制器连接失败")
 		}
 	}
 	
-	// 设置状态回调
-	s.serialController.SetStatusCallback(func(status *hardware.DeviceStatus) {
-		if status.ErrorCount > 10 {
-			s.logger.Warn("串口错误次数过多", 
-				zap.Int("error_count", status.ErrorCount),
-				zap.String("last_command", status.LastCommand))
-		}
+	// 设置事件回调
+	s.serialController.SetCoinInsertedCallback(func(count byte) {
+		s.logger.Info("投币检测", zap.Uint8("count", count))
+	})
+	
+	s.serialController.SetCoinReturnedCallback(func(data *hardware.CoinReturnData) {
+		s.logger.Info("回币检测", 
+			zap.Uint8("front", data.FrontCount),
+			zap.Uint8("left", data.LeftCount),
+			zap.Uint8("right", data.RightCount))
 	})
 	
 	s.logger.Info("串口管理器初始化完成", 

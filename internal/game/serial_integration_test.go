@@ -36,58 +36,97 @@ func (m *MockSerialController) PushCoin(force int, duration time.Duration) error
 	return m.returnError
 }
 
-func (m *MockSerialController) StopPush() error {
+// 币控制
+func (m *MockSerialController) DispenseCoins(count uint16, speed byte) error {
 	return nil
 }
 
-func (m *MockSerialController) StartMotor(speed int) error {
+func (m *MockSerialController) RefundCoins(count uint16) error {
 	return nil
 }
 
-func (m *MockSerialController) StopMotor() error {
+// 彩票控制
+func (m *MockSerialController) DispenseTickets(count uint16) error {
 	return nil
 }
 
-func (m *MockSerialController) SetMotorSpeed(speed int) error {
+// 推币控制
+func (m *MockSerialController) StartPushing() error {
 	return nil
 }
 
-func (m *MockSerialController) SetLights(pattern hardware.LightPattern) error {
+func (m *MockSerialController) StopPushing() error {
 	return nil
 }
 
-func (m *MockSerialController) FlashLights(duration time.Duration) error {
+func (m *MockSerialController) SinglePush(times byte) error {
 	return nil
 }
 
-func (m *MockSerialController) ReadCoinCount() (int, error) {
-	return 100, nil
+func (m *MockSerialController) SetPushSpeed(speed byte) error {
+	return nil
 }
 
-func (m *MockSerialController) ReadSensorStatus() (*hardware.SensorStatus, error) {
-	return &hardware.SensorStatus{
-		CoinDetected:   false,
-		MotorRunning:   false,
-		DoorOpen:       false,
-		Temperature:    25.0,
-		LastUpdateTime: time.Now(),
-	}, nil
+// 灯光控制
+func (m *MockSerialController) SetLights(lightBits byte) error {
+	return nil
 }
 
-func (m *MockSerialController) GetStatus() (*hardware.DeviceStatus, error) {
-	return &hardware.DeviceStatus{
-		Connected:       true,
-		MotorSpeed:      0,
-		PushForce:       m.force,
-		CoinCount:       100,
-		LightPattern:    hardware.LightOff,
-		LastCommand:     "PushCoin",
-		LastCommandTime: time.Now(),
-	}, nil
+func (m *MockSerialController) TurnOnLight(light byte) error {
+	return nil
 }
 
-func (m *MockSerialController) SetStatusCallback(callback hardware.StatusCallback) {
-	// 不需要实现
+func (m *MockSerialController) TurnOffAllLights() error {
+	return nil
+}
+
+func (m *MockSerialController) TurnOnAllLights() error {
+	return nil
+}
+
+func (m *MockSerialController) QueryStatus(queryType byte) error {
+	return nil
+}
+
+func (m *MockSerialController) GetStatistics() *hardware.CoinStatistics {
+	return &hardware.CoinStatistics{
+		CoinsInserted:      100,
+		CoinsDispensed:     50,
+		CoinsReturnedFront: 30,
+		CoinsReturnedLeft:  10,
+		CoinsReturnedRight: 10,
+	}
+}
+
+func (m *MockSerialController) ResetStatistics() {
+	// Mock implementation
+}
+
+// 故障恢复
+func (m *MockSerialController) RecoverFault(faultCode byte, action byte, param byte) error {
+	return nil
+}
+
+// 心跳
+func (m *MockSerialController) SendHeartbeat() error {
+	return nil
+}
+
+// 回调设置
+func (m *MockSerialController) SetCoinInsertedCallback(callback func(count byte)) {
+	// Mock implementation
+}
+
+func (m *MockSerialController) SetCoinReturnedCallback(callback func(data *hardware.CoinReturnData)) {
+	// Mock implementation
+}
+
+func (m *MockSerialController) SetButtonPressedCallback(callback func(event *hardware.ButtonEvent)) {
+	// Mock implementation
+}
+
+func (m *MockSerialController) SetFaultReportCallback(callback func(event *hardware.FaultEvent)) {
+	// Mock implementation
 }
 
 func TestGameService_SerialControllerIntegration(t *testing.T) {
