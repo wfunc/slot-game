@@ -6,14 +6,13 @@
 ```
 Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
          |                                    |
-    游戏逻辑/算法/MQTT                    硬件控制/传感器
+    游戏逻辑/MQTT                    硬件控制/传感器
 ```
 
 ### 1.2 职责划分
 - **Golang系统（主导方）**：
   - 游戏逻辑处理
-  - 算法执行
-  - 用户账户管理
+  - 账目管理
   - MQTT云端通信
   - 发送硬件控制指令
   - 接收硬件状态上报
@@ -79,6 +78,7 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 | 0x22 | 状态上报 | STM32→Go | 上报设备状态 |
 | 0x23 | 故障上报 | STM32→Go | 硬件故障 |
 | 0x24 | 执行进度 | STM32→Go | 指令执行进度 |
+| 0x25 | 故障恢复 | Go→STM32 | 故障恢复指令 |
 | **系统指令** |
 | 0x31 | 心跳包 | 双向 | 保持连接 |
 | 0x80 | ACK确认 | 双向 | 确认收到 |
@@ -188,18 +188,19 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 
 **Golang→STM32（灯光指令）**：
 ```
-[0xAA][长度][0x05][序列号][模式][颜色RGB][亮度][CRC16][0x55]
+[0xAA][长度][0x05][序列号][灯光位][CRC16][0x55]
 ```
 
 **数据字段**：
-- **模式**：uint8
-  - 0x01：常亮
-  - 0x02：闪烁
-  - 0x03：呼吸
-  - 0x04：流水
-  - 0x05：关闭
-- **颜色**：3字节（R,G,B）
-- **亮度**：uint8（0-255）
+**灯光位定义（bitmask）**：
+- `off`  = `0x20`   // 关
+- `l1`   = `0x22`   // 灯1
+- `l2`   = `0x30`   // 灯2
+- `l3`   = `0x24`   // 灯3
+- `l4`   = `0x28`   // 灯4
+- `l5`   = `0x21`   // 灯5
+- `lall` = `0x7F`   // 所有灯
+- `loff` = `0x40`   // 所有灯关闭
 
 ## 4. 硬件事件上报详细定义
 
@@ -209,15 +210,11 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 
 **STM32→Golang（投币事件）**：
 ```
-[0xAA][长度][0x11][序列号][数量][币种][CRC16][0x55]
+[0xAA][长度][0x11][序列号][数量][CRC16][0x55]
 ```
 
 **数据字段**：
 - **数量**：uint8，投币数量（通常为1）
-- **币种**：uint8
-  - 0x01：1元硬币
-  - 0x02：游戏币
-  - 0x03：代币
 
 **Golang→STM32（ACK确认）**：
 ```
@@ -229,21 +226,33 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 
 **重要性**：P0级别，必须100ms内响应
 
-### 4.2 回币检测（0x12）
+### 4.2 回币检测（0x12）（重要：用于回币率统计）
 
-**功能**：检测到游戏币被推出
+**功能**：检测到游戏币被推出，一次上报三个位置的数量
 
 **STM32→Golang（回币事件）**：
 ```
-[0xAA][长度][0x12][序列号][数量][位置][CRC16][0x55]
+[0xAA][长度][0x12][序列号][前方数量][左侧数量][右侧数量][CRC16][0x55]
 ```
 
-**数据字段**：
-- **数量**：uint8，回币数量
-- **位置**：uint8
-  - 0x01：前方出币口（玩家获得）
-  - 0x02：左侧出币口
-  - 0x03：右侧出币口
+**数据字段**（优化后）：
+- **前方数量**：uint8，前方出币口回币数（玩家获得，进入回币马达）
+- **左侧数量**：uint8，左侧出币口回币数（损失，不返还玩家）
+- **右侧数量**：uint8，右侧出币口回币数（损失，不返还玩家）
+
+**优点**：
+- 一次通信完成所有位置的上报
+- 减少通信次数，提高效率
+- 数据结构更清晰，易于解析
+
+**回币率计算**：
+- 回币率 = 前方数量 / (前方数量 + 左侧数量 + 右侧数量) × 100%
+- Golang根据回币率调整游戏难度和中奖概率
+
+**Golang→STM32（ACK确认）**：
+```
+[0xAA][长度][0x80][序列号][0x12][0x00][CRC16][0x55]
+```
 
 ### 4.3 按键事件（0x13）
 
@@ -262,20 +271,20 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 
 #### 游戏按键码（类型=0x01时）：
 - **0x01：开始按键**
-  - 功能：用户按下后，Golang将投币的游戏币通过上币接口落币，开始游戏
-  - 响应：Golang收到后执行 `上币控制(0x01)` 指令
+  - 功能：用户按下后，控制板通知Golang，Golang根据当前游戏币数量执行上币操作
+  - 响应：Golang收到后执行 `上币控制(0x01)` 指令，将币落入推盘开始游戏
   
-- **0x02：彩票按键**
-  - 功能：用户按下后，Golang调用彩票接口出票
-  - 响应：Golang收到后执行 `彩票发放(0x03)` 指令
+- **0x02：退币/彩票按键**（根据当前模式）
+  - 功能：同一个物理按键，根据Golang设置的模式执行不同功能
+  - 退币模式：Golang收到后执行 `退币控制(0x02)` 指令，退还游戏币
+  - 彩票模式：Golang收到后执行 `彩票发放(0x03)` 指令，打印彩票
+  - 注意：模式判断由Golang完成，STM32只负责上报按键事件
 
 #### 配置按键码（类型=0x02时）：
-- **0x11：上键**（↑）
-- **0x12：下键**（↓）
-- **0x13：左键**（←）
-- **0x14：右键**（→）
-- **0x15：确认键**（OK/Enter）
-- **0x16：取消键**（ESC/Cancel）
+- **0x11：上键（↑）/ 左键（←）**
+- **0x12：下键（↓）/ 右键（→）**
+- **0x13：确认键**（OK/Enter）
+- **0x14：取消键**（ESC/Cancel）
 
 #### 动作类型（uint8）：
 - 0x01：按下（KEY_DOWN）
@@ -295,10 +304,16 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
                                    游戏类 开始键 按下
 ```
 
-2. **彩票按键长按2秒**：
+2. **退币/彩票按键按下**（模式由Golang判断）：
+```
+[0xAA][0x00][0x0C][0x13][序列号][0x01][0x02][0x01][CRC16][0x55]
+                                   游戏类 退币/彩票键 按下
+```
+
+3. **退币/彩票按键长按2秒**（可用于特殊功能）：
 ```
 [0xAA][0x00][0x0E][0x13][序列号][0x01][0x02][0x03][0x07][0xD0][CRC16][0x55]
-                                   游戏类 彩票键 长按  2000ms
+                                   游戏类 退币/彩票键 长按  2000ms
 ```
 
 3. **配置上键按下**：
@@ -366,6 +381,7 @@ struct DeviceStatus {
     uint16_t ticket_count;     // 彩票余量
     uint8_t  temperature;      // 设备温度
     uint8_t  error_flags;      // 错误标志位
+    uint8_t  current_mode;     // 当前模式（0x01:退币 0x02:彩票）
 };
 ```
 
@@ -410,6 +426,69 @@ struct DeviceStatus {
 - 0x01：已完成
 - 0x02：已取消
 - 0x03：执行失败
+
+### 5.5 故障恢复（0x25）
+
+**功能**：当故障发生后，Golang发送恢复指令
+
+**Golang→STM32（故障恢复指令）**：
+```
+[0xAA][长度][0x25][序列号][故障码][恢复动作][参数][CRC16][0x55]
+```
+
+**数据字段**：
+- **故障码**：uint8，要恢复的故障类型（同故障上报的故障码）
+- **恢复动作**：uint8
+  - 0x01：重启设备
+  - 0x02：清除故障标志
+  - 0x03：强制重置
+  - 0x04：重试操作
+  - 0x05：跳过故障（仅记录）
+- **参数**：uint8，恢复动作的参数（如重试次数）
+
+**STM32→Golang（恢复结果）**：
+```
+[0xAA][长度][0x80][序列号][0x25][恢复状态][CRC16][0x55]
+```
+- **恢复状态**：
+  - 0x00：恢复成功
+  - 0x01：恢复失败，需人工干预
+  - 0x02：部分恢复
+  - 0x03：正在恢复中
+
+**自动恢复机制**：
+- 卡币：自动反转电机尝试清除
+- 卡纸：自动回收彩票并重新送纸
+- 过载：自动减速或暂停休息
+- 通信异常：自动重连3次
+
+### 5.6 断电数据保护方案
+
+**问题分析**：
+STM32不存储状态，断电后可能丢失少量回币统计数据
+
+**解决方案**：
+
+1. **实时上报 + Go端持久化（推荐）**
+   - STM32：检测到回币立即上报（<10ms）
+   - Golang：收到后立即写入数据库/文件
+   - 优点：STM32完全无状态，架构简单
+   - 缺点：极端情况下可能丢失1-2个币
+
+2. **高频上报策略**
+   - 回币事件触发时立即上报
+   - 每检测到一定数量（5-10个）累计上报
+   - 减少通信次数同时保证数据及时性
+
+3. **接受小概率损失**
+   - 回币率统计是长期数据
+   - 少量数据丢失（<0.1%）对统计影响可忽略
+   - 通过多次游戏累计平均值更准确
+
+**推荐方案**：
+- 采用方案1（实时上报+Go持久化）
+- STM32保持无状态设计
+- Golang端做好数据持久化和统计分析
 
 ## 6. 系统指令
 
@@ -481,49 +560,118 @@ STM32拒绝：[AA][00 0C][81][00 03][03][02][CRC][55]      // NACK：序列号00
 
 ## 7. 通信流程示例
 
-### 7.1 典型游戏流程
+### 7.1 完整游戏流程（从投币到结算）
 ```
 1. 用户投币
-   STM32: [投币检测] → Golang
-   Golang: [ACK确认] → STM32
+   STM32: [投币检测(0x11)] → Golang
+   Golang: [ACK确认(0x80)] → STM32
+   Golang: 记账，增加用户余额
    
-2. Golang计算游戏结果（内部处理，不涉及STM32）
+2. 用户按下开始按键
+   STM32: [按键事件(0x13): 开始键] → Golang
+   Golang: [ACK确认(0x80)] → STM32
+   Golang: 判断余额，决定上币数量
    
-3. 执行上币
-   Golang: [上币指令(20个)] → STM32
-   STM32: [ACK确认] → Golang
-   STM32: [执行进度(10/20)] → Golang
-   STM32: [执行进度(20/20)] → Golang
+3. 执行上币（币落入推盘）
+   Golang: [上币指令(0x01): 20个] → STM32
+   STM32: [ACK确认(0x80): 开始执行] → Golang
+   STM32: [执行进度(0x24): 5/20] → Golang
+   STM32: [执行进度(0x24): 10/20] → Golang
+   STM32: [执行进度(0x24): 15/20] → Golang
+   STM32: [执行进度(0x24): 20/20 完成] → Golang
    
 4. 推币动作
-   Golang: [推币控制(启动)] → STM32
-   STM32: [ACK确认] → Golang
+   Golang: [推币控制(0x04): 启动连续推币] → STM32
+   STM32: [ACK确认(0x80)] → Golang
    
-5. 检测回币
-   STM32: [回币检测(前方5个)] → Golang
-   Golang: [ACK确认] → STM32
+5. 回币检测（优化后：一次上报三个位置）
+   STM32: [回币检测(0x12): 前方5个，左侧2个，右侧1个] → Golang
+   Golang: [ACK确认(0x80)] → STM32
+   Golang: 记账，前方增加玩家积分，两侧记录损失
+   Golang: 计算回币率并持久化数据
    
-6. 发放彩票
-   Golang: [彩票发放(10张)] → STM32
-   STM32: [ACK确认] → Golang
-   STM32: [执行进度(10/10)] → Golang
+6. 结算阶段
+   Golang: 计算回币率 = 5/(5+2+1) = 62.5%
+   Golang: 根据回币率调整游戏参数
+   
+7. 用户按下退币/彩票按键
+   STM32: [按键事件(0x13): 退币/彩票键] → Golang
+   Golang: [ACK确认(0x80)] → STM32
+   Golang: 内部判断当前模式（STM32不保存模式状态）
+   
+   若Golang内部设置为退币模式：
+   Golang: [退币控制(0x02): 10个] → STM32
+   STM32: [ACK确认(0x80)] → Golang
+   STM32: [执行进度(0x24): 10/10 完成] → Golang
+   
+   若Golang内部设置为彩票模式：
+   Golang: [彩票发放(0x03): 10张] → STM32
+   STM32: [ACK确认(0x80)] → Golang
+   STM32: [执行进度(0x24): 10/10 完成] → Golang
 ```
 
-### 7.2 故障处理流程
+### 7.2 模式管理说明（STM32无状态设计）
+```
+1. 模式完全由Golang管理
+   - Golang内部保存当前模式（退币/彩票）
+   - 根据配置或运营需求切换
+   - STM32不知道当前模式
+   
+2. 按键处理流程
+   - STM32: 仅上报按键事件
+   - Golang: 根据内部模式决定执行操作
+   - 执行: 发送对应指令给STM32
+```
+
+### 7.3 回币率统计方案（Go端实现）
+```
+1. 实时数据采集
+   STM32: 检测到回币立即上报三个位置数量
+   Golang: 接收后立即保存到数据库
+   
+2. 统计分析（Golang端）
+   - 累计各位置回币数量
+   - 计算回币率 = 前方/(前方+左侧+右侧)
+   - 根据回币率调整游戏难度
+   
+3. 持久化存储
+   - 每次接收到数据立即写入
+   - 定期生成统计报表
+   - 支持历史数据查询
+```
+
+### 7.4 故障处理与恢复流程
 ```
 1. STM32检测到故障
-   STM32: [故障上报(彩票缺纸)] → Golang
-   Golang: [ACK确认] → STM32
+   STM32: [故障上报(0x23): 彩票缺纸，严重级别2] → Golang
+   Golang: [ACK确认(0x80)] → STM32
    
-2. Golang处理
-   - 记录日志
-   - 停止彩票相关操作
-   - 通知维护（如需要）
+2. Golang处理决策
+   - 记录故障日志
+   - 判断严重级别
+   - 决定恢复策略
    
-3. 故障恢复
-   维护人员添加彩票纸
-   Golang: [状态查询] → STM32
-   STM32: [状态上报(正常)] → Golang
+3. 自动恢复尝试
+   Golang: [故障恢复(0x25): 故障码，重试操作] → STM32
+   STM32: 执行恢复动作
+   STM32: [ACK确认(0x80): 恢复状态] → Golang
+   
+4. 恢复结果判断
+   若成功：
+   - 恢复正常操作
+   - 记录恢复成功
+   
+   若失败：
+   - 停止相关操作
+   - 通知维护人员
+   - 显示故障提示
+   
+5. 人工干预后
+   维护人员处理（如添加彩票纸）
+   Golang: [故障恢复(0x25): 清除故障标志] → STM32
+   STM32: [ACK确认(0x80): 恢复成功] → Golang
+   Golang: [状态查询(0x21)] → STM32
+   STM32: [状态上报(0x22): 正常] → Golang
 ```
 
 ## 8. STM32实现要求
@@ -574,21 +722,17 @@ typedef struct {
     uint16_t pin;
     uint8_t key_code;
     uint8_t key_type;
+    char* description;
 } KeyConfig;
 
-// 按键配置表
+// 按键配置表（只有2个游戏按键）
 const KeyConfig key_map[] = {
     // 游戏按键
-    {GPIOA, GPIO_PIN_0, 0x01, 0x01},  // 开始按键
-    {GPIOA, GPIO_PIN_1, 0x02, 0x01},  // 彩票按键
+    {GPIOA, GPIO_PIN_0, 0x01, 0x01, "开始按键"},     // 开始按键
+    {GPIOA, GPIO_PIN_1, 0x02, 0x01, "退币/彩票键"},  // 退币/彩票按键（根据模式）
     
-    // 配置按键组
-    {GPIOB, GPIO_PIN_0, 0x11, 0x02},  // 上键
-    {GPIOB, GPIO_PIN_1, 0x12, 0x02},  // 下键
-    {GPIOB, GPIO_PIN_2, 0x13, 0x02},  // 左键
-    {GPIOB, GPIO_PIN_3, 0x14, 0x02},  // 右键
-    {GPIOB, GPIO_PIN_4, 0x15, 0x02},  // 确认键
-    {GPIOB, GPIO_PIN_5, 0x16, 0x02},  // 取消键
+    // 注：配置按键可选，若需要可通过长按或组合键实现
+    // 例如：同时按住两个按键3秒进入配置模式
 };
 
 // 按键状态机
@@ -633,15 +777,50 @@ void scan_keys(void) {
     }
 }
 
-// 特殊组合键检测（配置菜单进入）
+// 特殊组合键检测（可选功能）
 bool check_config_entry(void) {
-    // 同时按住确认键+取消键3秒进入工程模式
-    if (is_key_pressed(KEY_OK) && is_key_pressed(KEY_CANCEL)) {
+    // 同时按住两个按键3秒进入工程模式（可选）
+    if (is_key_pressed(KEY_START) && is_key_pressed(KEY_REFUND_TICKET)) {
         if (get_combo_press_time() >= 3000) {
+            // 发送特殊组合键事件给Golang
+            send_combo_key_event(0x01, 0x02, 3000);
             return true;
         }
     }
     return false;
+}
+
+// 发送回币事件（优化后：一次发送三个位置数据）
+void send_coin_return_event(uint8_t front, uint8_t left, uint8_t right) {
+    // 新数据格式：[前方数量][左侧数量][右侧数量]
+    uint8_t data[3] = {front, left, right};
+    
+    // 发送回币检测事件
+    send_event(0x12, data, sizeof(data));
+    
+    // 注意：STM32不存储统计数据，所有统计由Golang完成
+    
+    // 调试输出
+    #ifdef DEBUG
+    printf("回币事件: 前方=%d, 左侧=%d, 右侧=%d\n", front, left, right);
+    #endif
+}
+
+// 回币检测处理（定时调用或中断触发）
+void process_coin_return_detection(void) {
+    uint8_t front_coins = 0;
+    uint8_t left_coins = 0;
+    uint8_t right_coins = 0;
+    
+    // 检测各位置回币数量
+    front_coins = detect_front_coins();
+    left_coins = detect_left_coins();
+    right_coins = detect_right_coins();
+    
+    // 如果有任何位置检测到回币，立即上报
+    if (front_coins > 0 || left_coins > 0 || right_coins > 0) {
+        send_coin_return_event(front_coins, left_coins, right_coins);
+    }
 }
 ```
 
@@ -765,6 +944,48 @@ func (c *STM32Controller) onCoinInserted(data []byte) {
     
     // 3. 等待用户按开始键
     // 不自动开始，由按键触发
+    
+    log.Printf("投币检测: 数量:%d 类型:%s", count, c.getCoinTypeName(coinType))
+}
+
+// 回币事件处理（优化后：一次接收三个位置数据）
+func (c *STM32Controller) onCoinReturned(data []byte) {
+    // 新数据格式：[前方数量][左侧数量][右侧数量]
+    frontCount := data[0]
+    leftCount := data[1]
+    rightCount := data[2]
+    
+    // 1. 发送ACK确认
+    c.sendAck(data)
+    
+    // 2. 处理回币数据
+    if frontCount > 0 {
+        gameLogic.AddPlayerCoins(frontCount)
+        c.stats.CoinsReturnedFront += uint16(frontCount)
+        log.Printf("回币检测[前方]: %d个 (玩家获得)", frontCount)
+    }
+    
+    if leftCount > 0 {
+        c.stats.CoinsReturnedLeft += uint16(leftCount)
+        log.Printf("回币检测[左侧]: %d个 (损失)", leftCount)
+    }
+    
+    if rightCount > 0 {
+        c.stats.CoinsReturnedRight += uint16(rightCount)
+        log.Printf("回币检测[右侧]: %d个 (损失)", rightCount)
+    }
+    
+    // 3. 立即持久化数据（防断电丢失）
+    c.saveStatisticsToDatabase(&c.stats)
+    
+    // 4. 实时计算回币率
+    returnRate := c.calculateReturnRate(&c.stats)
+    
+    // 5. 通知游戏逻辑
+    gameLogic.UpdateReturnRate(returnRate)
+    
+    log.Printf("回币统计更新: 前:%d 左:%d 右:%d 回币率:%.2f%%",
+        frontCount, leftCount, rightCount, returnRate)
 }
 
 // 按键事件处理
@@ -809,20 +1030,87 @@ func (c *STM32Controller) handleGameButton(keyCode, action byte) {
             c.PlaySound(SOUND_NEED_COIN)
         }
         
-    case 0x02: // 彩票按键
-        if gameLogic.HasTickets() {
-            // 获取可兑换彩票数
-            ticketCount := gameLogic.GetAvailableTickets()
-            
-            // 发放彩票
-            c.DispenseTickets(ticketCount)
-            
-            // 扣除彩票积分
-            gameLogic.RedeemTickets(ticketCount)
-        } else {
-            // 提示无可用彩票
-            c.PlaySound(SOUND_NO_TICKET)
+    case 0x02: // 退币/彩票按键（根据内部模式）
+        // 判断内部模式（STM32不存储模式）
+        if gameLogic.GetCurrentMode() == MODE_COIN_REFUND { // 退币模式
+            if gameLogic.HasRefundableCoins() {
+                // 获取可退币数
+                coinCount := gameLogic.GetRefundableCoins()
+                
+                // 发送退币指令
+                c.RefundCoins(coinCount)
+                
+                // 扣除余额
+                gameLogic.DeductCoins(coinCount)
+            } else {
+                // 提示无可退币
+                c.PlaySound(SOUND_NO_COIN)
+            }
+        } else if gameLogic.GetCurrentMode() == MODE_TICKET { // 彩票模式
+            if gameLogic.HasTickets() {
+                // 获取可兑换彩票数
+                ticketCount := gameLogic.GetAvailableTickets()
+                
+                // 发放彩票
+                c.DispenseTickets(ticketCount)
+                
+                // 扣除彩票积分
+                gameLogic.RedeemTickets(ticketCount)
+            } else {
+                // 提示无可用彩票
+                c.PlaySound(SOUND_NO_TICKET)
+            }
         }
+    }
+}
+
+// 回币率统计（Go端实现）
+type CoinStatistics struct {
+    CoinsReturnedFront uint16  // 前方回币
+    CoinsReturnedLeft  uint16  // 左侧回币
+    CoinsReturnedRight uint16  // 右侧回币
+    ReturnRate         float64 // 回币率
+    Timestamp          time.Time
+}
+
+// 计算回币率
+func (c *STM32Controller) calculateReturnRate(stats *CoinStatistics) float64 {
+    totalReturned := stats.CoinsReturnedFront + 
+                    stats.CoinsReturnedLeft + 
+                    stats.CoinsReturnedRight
+    
+    if totalReturned == 0 {
+        return 0
+    }
+    
+    // 回币率 = 前方回币 / 总回币
+    returnRate := float64(stats.CoinsReturnedFront) / float64(totalReturned) * 100
+    
+    log.Printf("回币率统计: 前方:%d 左侧:%d 右侧:%d 回币率:%.2f%%",
+        stats.CoinsReturnedFront,
+        stats.CoinsReturnedLeft,
+        stats.CoinsReturnedRight,
+        returnRate)
+    
+    return returnRate
+}
+
+// 根据回币率调整游戏难度
+func (c *STM32Controller) adjustGameDifficulty(returnRate float64) {
+    switch {
+    case returnRate < 30:
+        // 回币率太低，降低难度
+        gameLogic.SetDifficulty(DIFFICULTY_EASY)
+        log.Println("回币率过低，调整为简单模式")
+        
+    case returnRate > 70:
+        // 回币率太高，增加难度
+        gameLogic.SetDifficulty(DIFFICULTY_HARD)
+        log.Println("回币率过高，调整为困难模式")
+        
+    default:
+        // 回币率正常
+        gameLogic.SetDifficulty(DIFFICULTY_NORMAL)
     }
 }
 
@@ -841,21 +1129,21 @@ func (c *STM32Controller) handleConfigButton(keyCode, action byte) {
             c.configMenu.PrevItem()
         case 0x12: // 下键
             c.configMenu.NextItem()
-        case 0x15: // 确认键
+        case 0x13: // 确认键
             c.configMenu.SelectItem()
-        case 0x16: // 取消键
+        case 0x14: // 取消键
             c.configMenu.Close()
         }
         
     case MENU_SETTING:
         switch keyCode {
-        case 0x13: // 左键
+        case 0x11: // 左键
             c.configMenu.DecrValue()
-        case 0x14: // 右键
+        case 0x12: // 右键
             c.configMenu.IncrValue()
-        case 0x15: // 确认键
+        case 0x13: // 确认键
             c.configMenu.SaveSetting()
-        case 0x16: // 取消键
+        case 0x14: // 取消键
             c.configMenu.Back()
         }
     }
@@ -949,14 +1237,79 @@ A: STM32使用事件队列，按时间顺序依次上报，Golang依次处理。
 ## 文档信息
 
 **版本**：v1.0  
-**创建日期**：2025-01-11  
+**创建日期**：2025-09-12  
 **适用对象**：STM32硬件工程师  
 **上位机环境**：Ubuntu + Golang  
-**通信方式**：串口（UART）  
+**通信方式**：串口
 **协议特点**：Golang主导，STM32被动响应
 
 **修订记录**：
 - v1.0：初始版本，定义基础硬件控制协议
+- v2.0：优化版本，根据实际需求完善协议设计
+
+---
+
+## 12. 关键改进总结
+
+### 12.1 按键系统优化
+✅ **简化为2个游戏按键**
+- 开始按键：触发上币、开始游戏
+- 退币/彩票按键：根据模式执行不同功能
+- 模式判断由Golang完成，STM32只上报按键事件
+
+### 12.2 STM32无状态设计
+✅ **完全无状态架构**
+- STM32不存储任何状态和数据
+- 模式判断完全由Golang内部完成
+- 同一按键的功能由Golang根据内部模式决定
+
+### 12.3 回币数据优化
+✅ **一次上报三个位置**
+- 数据格式：[前方数量][左侧数量][右侧数量]
+- 减少通信次数，提高效率
+- 前方回币：玩家获得，计入收益
+- 两侧回币：损失，不返还玩家
+
+✅ **Go端统计实现**
+- 所有统计在Golang端实现
+- 实时计算回币率
+- 立即持久化防止断电丢失
+
+### 12.4 执行反馈机制
+✅ **完整的执行流程**
+- 所有硬件操作：ACK确认 → 执行进度 → 完成确认
+- 实时进度上报(0x24)
+- 详细的状态码和错误码定义
+
+### 12.5 断电保护方案
+✅ **实时上报+Go持久化**
+- STM32检测即上报（<10ms）
+- Golang立即写入数据库
+- 接受小概率损失（<0.1%）
+- STM32保持无状态设计
+
+### 12.6 故障恢复机制
+✅ **增强故障处理**
+- 故障恢复指令(0x25)：主动发起恢复
+- 自动恢复机制：卡币反转、卡纸重试等
+- 故障严重级别分类
+- 多种恢复策略：重启、清除、重试、跳过
+
+### 12.6 通信流程优化
+✅ **清晰的流程定义**
+- 完整游戏流程：从投币到结算
+- 模式切换流程
+- 回币率统计流程
+- 故障处理与恢复流程
+
+### 12.7 代码示例完善
+✅ **Golang和STM32实现示例**
+- 按键处理逻辑（含模式判断）
+- 回币率计算和难度调整
+- 统计数据处理
+- 故障恢复处理
+
+---
 
 **联系方式**：
 - Golang开发：[系统开发团队]
