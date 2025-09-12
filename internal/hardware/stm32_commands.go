@@ -234,14 +234,17 @@ func (c *STM32Controller) RecoverFault(faultCode byte, action byte, param byte) 
 
 // SendHeartbeat 发送心跳
 func (c *STM32Controller) SendHeartbeat() error {
-	timestamp := FormatTimestamp(time.Now())
+	// 构建心跳数据（包含版本号）
+	data := make([]byte, 5)
+	copy(data[0:4], FormatTimestamp(time.Now()))
+	data[4] = 0x01 // 协议版本号 v1.1
 	
-	err := c.sendCommandWithTimeout(CmdHeartbeat, timestamp, 5*time.Second)
+	err := c.sendCommandWithTimeout(CmdHeartbeat, data, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("heartbeat failed: %w", err)
 	}
 	
-	c.logger.Debug("Heartbeat sent")
+	c.logger.Debug("Heartbeat sent", zap.Uint8("version", data[4]))
 	return nil
 }
 
@@ -701,6 +704,21 @@ func (c *STM32Controller) handleHeartbeat(frame *Frame) {
 	// timestamp := ParseTimestamp(frame.Data[0:4])
 	// uptime := binary.BigEndian.Uint32(frame.Data[4:8])
 	
+	// 检查是否有版本信息（协议v1.1）
+	if len(frame.Data) >= 9 {
+		stm32Version := frame.Data[8]
+		c.logger.Debug("Heartbeat received", 
+			zap.Uint8("stm32_version", stm32Version),
+			zap.Uint8("frame_version", frame.Version))
+		
+		// 版本协商：如果版本不匹配，可以记录或处理
+		if frame.Version != 0x01 && stm32Version != 0x01 {
+			c.logger.Warn("Protocol version mismatch",
+				zap.Uint8("expected", 0x01),
+				zap.Uint8("received", stm32Version))
+		}
+	}
+	
 	c.logger.Debug("Heartbeat response received")
 }
 
@@ -736,17 +754,65 @@ func (c *STM32Controller) saveStatistics() {
 		stats.ReturnRate = float64(totalReturned) / float64(stats.CoinsInserted)
 	}
 	
-	// 保存到文件（JSON格式）
-	filename := fmt.Sprintf("data/statistics_%s.json", time.Now().Format("20060102"))
-	if err := c.saveStatsToFile(filename, &stats); err != nil {
-		c.logger.Error("Failed to save statistics to file", zap.Error(err))
+	// 使用事务支持的批量保存
+	if err := c.saveStatisticsWithTransaction(&stats); err != nil {
+		c.logger.Error("Failed to save statistics with transaction", zap.Error(err))
+		// 降级到普通保存
+		filename := fmt.Sprintf("data/statistics_%s.json", time.Now().Format("20060102"))
+		if err := c.saveStatsToFile(filename, &stats); err != nil {
+			c.logger.Error("Failed to save statistics to file", zap.Error(err))
+		}
 	}
 	
 	c.logger.Info("Statistics saved",
-		zap.String("file", filename),
 		zap.Uint16("coins_inserted", stats.CoinsInserted),
 		zap.Uint16("coins_dispensed", stats.CoinsDispensed),
 		zap.Float64("return_rate", stats.ReturnRate))
+}
+
+// saveStatisticsWithTransaction 使用事务保存统计数据
+func (c *STM32Controller) saveStatisticsWithTransaction(stats *CoinStatistics) error {
+	// 确保目录存在
+	if err := os.MkdirAll("data", 0755); err != nil {
+		return fmt.Errorf("create data directory failed: %w", err)
+	}
+	
+	// 生成文件名
+	filename := fmt.Sprintf("data/statistics_%s.json", time.Now().Format("20060102"))
+	tempFile := filename + ".tmp"
+	backupFile := filename + ".bak"
+	
+	// 1. 写入临时文件
+	data, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal statistics failed: %w", err)
+	}
+	
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("write temp file failed: %w", err)
+	}
+	
+	// 2. 如果原文件存在，创建备份
+	if _, err := os.Stat(filename); err == nil {
+		if err := os.Rename(filename, backupFile); err != nil {
+			os.Remove(tempFile) // 清理临时文件
+			return fmt.Errorf("backup original file failed: %w", err)
+		}
+	}
+	
+	// 3. 将临时文件重命名为目标文件
+	if err := os.Rename(tempFile, filename); err != nil {
+		// 尝试恢复备份
+		if _, berr := os.Stat(backupFile); berr == nil {
+			os.Rename(backupFile, filename)
+		}
+		return fmt.Errorf("rename temp file failed: %w", err)
+	}
+	
+	// 4. 删除备份文件（可选）
+	os.Remove(backupFile)
+	
+	return nil
 }
 
 // saveStatsToFile 保存统计数据到文件

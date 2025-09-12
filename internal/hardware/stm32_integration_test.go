@@ -307,26 +307,35 @@ func TestSTM32EventHandling(t *testing.T) {
 	controller.connected = true
 	controller.stopCh = make(chan struct{})
 	
-	// 设置事件回调
+	// 设置事件回调（使用互斥锁保护共享变量）
+	var mu sync.Mutex
 	var coinInsertedCount byte
 	var coinReturnData *CoinReturnData
 	var buttonEvent *ButtonEvent
 	var faultEvent *FaultEvent
 	
 	controller.SetCoinInsertedCallback(func(count byte) {
+		mu.Lock()
 		coinInsertedCount = count
+		mu.Unlock()
 	})
 	
 	controller.SetCoinReturnedCallback(func(data *CoinReturnData) {
+		mu.Lock()
 		coinReturnData = data
+		mu.Unlock()
 	})
 	
 	controller.SetButtonPressedCallback(func(event *ButtonEvent) {
+		mu.Lock()
 		buttonEvent = event
+		mu.Unlock()
 	})
 	
 	controller.SetFaultReportCallback(func(event *FaultEvent) {
+		mu.Lock()
 		faultEvent = event
+		mu.Unlock()
 	})
 	
 	// 启动后台任务
@@ -342,7 +351,10 @@ func TestSTM32EventHandling(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.Equal(t, byte(5), coinInsertedCount)
+		mu.Lock()
+		count := coinInsertedCount
+		mu.Unlock()
+		assert.Equal(t, byte(5), count)
 	})
 	
 	t.Run("回币事件", func(t *testing.T) {
@@ -353,10 +365,13 @@ func TestSTM32EventHandling(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.NotNil(t, coinReturnData)
-		assert.Equal(t, byte(3), coinReturnData.FrontCount)
-		assert.Equal(t, byte(2), coinReturnData.LeftCount)
-		assert.Equal(t, byte(1), coinReturnData.RightCount)
+		mu.Lock()
+		returnData := coinReturnData
+		mu.Unlock()
+		assert.NotNil(t, returnData)
+		assert.Equal(t, byte(3), returnData.FrontCount)
+		assert.Equal(t, byte(2), returnData.LeftCount)
+		assert.Equal(t, byte(1), returnData.RightCount)
 	})
 	
 	t.Run("按键事件", func(t *testing.T) {
@@ -367,10 +382,13 @@ func TestSTM32EventHandling(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.NotNil(t, buttonEvent)
-		assert.Equal(t, KeyTypeGame, buttonEvent.KeyType)
-		assert.Equal(t, KeyStart, buttonEvent.KeyCode)
-		assert.Equal(t, KeyActionDown, buttonEvent.Action)
+		mu.Lock()
+		btnEvent := buttonEvent
+		mu.Unlock()
+		assert.NotNil(t, btnEvent)
+		assert.Equal(t, KeyTypeGame, btnEvent.KeyType)
+		assert.Equal(t, KeyStart, btnEvent.KeyCode)
+		assert.Equal(t, KeyActionDown, btnEvent.Action)
 	})
 	
 	t.Run("故障事件", func(t *testing.T) {
@@ -381,9 +399,12 @@ func TestSTM32EventHandling(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.NotNil(t, faultEvent)
-		assert.Equal(t, FaultCoinMotorStuck, faultEvent.FaultCode)
-		assert.Equal(t, FaultLevelError, faultEvent.Level)
+		mu.Lock()
+		fltEvent := faultEvent
+		mu.Unlock()
+		assert.NotNil(t, fltEvent)
+		assert.Equal(t, FaultCoinMotorStuck, fltEvent.FaultCode)
+		assert.Equal(t, FaultLevelError, fltEvent.Level)
 	})
 	
 	// 清理
@@ -399,9 +420,13 @@ func TestSTM32SensorEvents(t *testing.T) {
 	controller.connected = true
 	controller.stopCh = make(chan struct{})
 	
+	// 使用互斥锁保护共享变量
+	var mu sync.Mutex
 	var lastFaultEvent *FaultEvent
 	controller.SetFaultReportCallback(func(event *FaultEvent) {
+		mu.Lock()
 		lastFaultEvent = event
+		mu.Unlock()
 	})
 	
 	// 启动后台任务
@@ -421,9 +446,12 @@ func TestSTM32SensorEvents(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.NotNil(t, lastFaultEvent)
-		assert.Equal(t, FaultNoResource, lastFaultEvent.FaultCode)
-		assert.Equal(t, FaultLevelCritical, lastFaultEvent.Level)
+		mu.Lock()
+		faultEvent := lastFaultEvent
+		mu.Unlock()
+		assert.NotNil(t, faultEvent)
+		assert.Equal(t, FaultNoResource, faultEvent.FaultCode)
+		assert.Equal(t, FaultLevelCritical, faultEvent.Level)
 	})
 	
 	t.Run("温度过高", func(t *testing.T) {
@@ -437,14 +465,19 @@ func TestSTM32SensorEvents(t *testing.T) {
 		
 		time.Sleep(100 * time.Millisecond)
 		
-		assert.NotNil(t, lastFaultEvent)
-		assert.Equal(t, FaultOverTemperature, lastFaultEvent.FaultCode)
-		assert.Equal(t, FaultLevelCritical, lastFaultEvent.Level)
+		mu.Lock()
+		faultEvent := lastFaultEvent
+		mu.Unlock()
+		assert.NotNil(t, faultEvent)
+		assert.Equal(t, FaultOverTemperature, faultEvent.FaultCode)
+		assert.Equal(t, FaultLevelCritical, faultEvent.Level)
 	})
 	
 	t.Run("门开关检测", func(t *testing.T) {
 		// 清空上一个测试的事件
+		mu.Lock()
 		lastFaultEvent = nil
+		mu.Unlock()
 		
 		// 模拟门打开
 		data := make([]byte, 3)
@@ -458,9 +491,12 @@ func TestSTM32SensorEvents(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		
 		// 添加nil检查，避免panic
-		if lastFaultEvent != nil {
-			assert.Equal(t, FaultSensorAbnormal, lastFaultEvent.FaultCode)
-			assert.Equal(t, FaultLevelWarning, lastFaultEvent.Level)
+		mu.Lock()
+		faultEvent := lastFaultEvent
+		mu.Unlock()
+		if faultEvent != nil {
+			assert.Equal(t, FaultSensorAbnormal, faultEvent.FaultCode)
+			assert.Equal(t, FaultLevelWarning, faultEvent.Level)
 		} else {
 			t.Log("警告：未接收到故障事件，可能是时序问题")
 		}

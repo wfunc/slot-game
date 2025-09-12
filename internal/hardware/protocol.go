@@ -152,6 +152,7 @@ type Frame struct {
 	Data     []byte // 数据
 	CRC16    uint16 // CRC校验
 	Tail     byte   // 帧尾
+	Version  byte   // 协议版本（用于心跳等需要版本协商的命令）
 }
 
 // DeviceStatus 设备状态结构

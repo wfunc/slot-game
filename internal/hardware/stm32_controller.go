@@ -68,6 +68,10 @@ type STM32Controller struct {
 	
 	// 游戏逻辑接口
 	gameLogic   GameLogicInterface
+	
+	// 资源锁定
+	resourceLock sync.Mutex    // 资源操作锁
+	lockedResources map[byte]bool // 已锁定的资源ID映射
 }
 
 // PendingCommand 待确认的命令
@@ -124,6 +128,7 @@ func NewSTM32Controller(config *STM32Config, gameLogic GameLogicInterface) *STM3
 		ackCh:       make(chan *Frame, 10),
 		pendingCmds: make(map[uint16]*PendingCommand),
 		gameLogic:   gameLogic,
+		lockedResources: make(map[byte]bool),
 	}
 }
 
@@ -136,12 +141,12 @@ func (c *STM32Controller) Connect() error {
 		return nil
 	}
 	
-	// 配置串口
+	// 配置串口 - 8N2配置（8数据位，无校验，2停止位）
 	cfg := &serial.Config{
 		Name:        c.config.Port,
 		Baud:        c.config.BaudRate,
 		Size:        byte(c.config.DataBits),
-		StopBits:    serial.StopBits(c.config.StopBits),
+		StopBits:    serial.Stop2, // 明确使用2个停止位
 		ReadTimeout: c.config.ReadTimeout,
 	}
 	
@@ -234,6 +239,25 @@ func (c *STM32Controller) sendCommandWithTimeout(cmd byte, data []byte, timeout 
 		return fmt.Errorf("not connected")
 	}
 	
+	// 检查资源锁定状态
+	resourceID := c.getResourceIDForCommand(cmd)
+	if resourceID != 0 {
+		c.resourceLock.Lock()
+		if c.lockedResources[resourceID] {
+			c.resourceLock.Unlock()
+			return fmt.Errorf("resource %d is locked for cmd 0x%02X", resourceID, cmd)
+		}
+		c.lockedResources[resourceID] = true
+		c.resourceLock.Unlock()
+		
+		// 确保资源解锁
+		defer func() {
+			c.resourceLock.Lock()
+			delete(c.lockedResources, resourceID)
+			c.resourceLock.Unlock()
+		}()
+	}
+	
 	seq := c.getNextSeq()
 	frame := NewFrame(cmd, seq, data)
 	
@@ -269,6 +293,26 @@ func (c *STM32Controller) sendCommandWithTimeout(cmd byte, data []byte, timeout 
 		return err
 	case <-time.After(timeout):
 		return fmt.Errorf("wait ACK timeout for cmd 0x%02X seq %d", cmd, seq)
+	}
+}
+
+// getResourceIDForCommand 根据命令获取资源ID
+func (c *STM32Controller) getResourceIDForCommand(cmd byte) byte {
+	// 资源映射：不同命令对应的资源ID
+	// 只对真正的物理冲突资源进行锁定
+	switch cmd {
+	case CmdCoinDispense:
+		return 1 // 上币电机资源
+	case CmdCoinRefund:
+		return 2 // 退币电机资源（独立的电机）
+	case CmdTicketPrint:
+		return 3 // 打印机资源
+	case CmdPushControl:
+		return 4 // 推币机构资源
+	case CmdLightControl:
+		return 0 // 灯光控制不需要锁定（可并发）
+	default:
+		return 0 // 无需锁定资源
 	}
 }
 

@@ -1,4 +1,121 @@
-# STM32硬件控制通信协议文档
+# STM32硬件控制通信协议文档 v1.1
+
+## 文档信息
+
+**版本**：v1.1  
+**更新日期**：2025-09-12  
+**适用对象**：STM32硬件工程师、Golang后端开发工程师  
+**上位机环境**：Ubuntu + Golang  
+**通信方式**：串口 (UART)  
+**协议特点**：Golang主导，STM32被动响应，无状态设计
+
+## 更新日志
+
+| 版本 | 日期 | 更新内容 |
+|------|------|----------|
+| v1.0 | 2025-09-12 | 初始版本 |
+| v1.1 | 2025-09-12 | 新增序列号管理规则、异常恢复流程、时序规范、并发控制、数据持久化策略 |
+
+---
+
+## 第一部分：快速开始
+
+### 系统架构概览
+
+```
+┌─────────────────────────────────────────────────┐
+│         Golang系统（Ubuntu）[主导方]              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ 游戏逻辑  │  │ 账目管理  │  │ MQTT通信 │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+│         ↓            ↓            ↓              │
+│  ┌────────────────────────────────────┐         │
+│  │      硬件控制协议层 (本文档)         │         │
+│  └────────────────────────────────────┘         │
+└─────────────────↓↑──────────────────────────────┘
+              串口通信
+              115200bps
+┌─────────────────↓↑──────────────────────────────┐
+│         STM32控制板 [被动执行方]                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ 电机控制  │  │ 传感器   │  │ 灯光控制  │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+│         ↓            ↓            ↓              │
+│  ┌────────────────────────────────────┐         │
+│  │         硬件设备层                  │         │
+│  └────────────────────────────────────┘         │
+└─────────────────────────────────────────────────┘
+```
+
+### 最小实现示例
+
+#### STM32端最小实现
+```c
+// 1. 初始化串口
+void init_uart() {
+    // 配置: 115200, 8N2, 无流控
+    HAL_UART_Init(&huart3);
+}
+
+// 2. 接收处理
+void process_command(uint8_t cmd, uint8_t* data) {
+    switch(cmd) {
+        case 0x01: // 上币控制
+            uint16_t count = (data[0] << 8) | data[1];
+            dispense_coins(count);
+            send_ack(0x00); // 成功
+            break;
+        case 0x31: // 心跳
+            send_heartbeat_response();
+            break;
+    }
+}
+
+// 3. 事件上报
+void on_coin_inserted() {
+    uint8_t data[1] = {1}; // 1个币
+    send_event(0x11, data, 1);
+}
+```
+
+#### Golang端最小实现
+```go
+// 1. 连接串口
+port, _ := serial.OpenPort(&serial.Config{
+    Name: "/dev/ttyS3",
+    Baud: 115200,
+})
+
+// 2. 发送命令
+func dispenseCoins(count uint16) {
+    data := make([]byte, 2)
+    binary.BigEndian.PutUint16(data, count)
+    sendCommand(0x01, data)
+}
+
+// 3. 处理事件
+func handleEvent(cmd byte, data []byte) {
+    switch cmd {
+    case 0x11: // 投币
+        coinCount := data[0]
+        gameLogic.AddCredits(coinCount)
+    }
+}
+```
+
+### 常见问题速查
+
+| 问题 | 解决方案 | 参考章节 |
+|------|----------|----------|
+| 串口连接失败 | 检查端口权限、波特率配置 | 2.1 |
+| 命令无响应 | 检查序列号、CRC校验 | 2.2, 2.4 |
+| 投币检测延迟 | 优化中断优先级 | 8.4 |
+| 数据丢失 | 启用持久化策略 | 9.3 |
+| 通信中断 | 查看异常恢复流程 | 7.5 |
+
+---
+
+## 第二部分：协议规范
 
 ## 1. 概述
 
@@ -83,6 +200,47 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
 | 0x31 | 心跳包 | 双向 | 保持连接 |
 | 0x80 | ACK确认 | 双向 | 确认收到 |
 | 0x81 | NACK拒绝 | 双向 | 执行失败 |
+
+### 2.4 序列号管理规则
+
+#### 序列号分配
+- Golang发送：使用奇数序列号（0x0001, 0x0003, 0x0005...）
+- STM32上报：使用偶数序列号（0x0002, 0x0004, 0x0006...）
+
+#### 序列号溢出处理
+- 当序列号达到0xFFFF时，下一个序列号回到0x0001（Golang）或0x0002（STM32）
+- 序列号不要求严格连续，但必须保持奇偶性
+- 序列号生成示例：
+```c
+// STM32端
+uint16_t get_next_seq() {
+    static uint16_t seq = 0;
+    seq += 2;
+    if (seq == 0 || seq == 0xFFFF) {
+        seq = 0x0002; // 重新从2开始
+    }
+    return seq;
+}
+```
+
+#### 序列号防重机制
+- STM32应维护最近接收的10个序列号缓存
+- 收到重复序列号时，返回上次的执行结果，不重复执行
+- 缓存时间：5分钟后自动清除
+```c
+typedef struct {
+    uint16_t seq;
+    uint8_t cmd;
+    uint8_t result;
+    uint32_t timestamp;
+} CmdCache;
+
+CmdCache cmd_cache[10];
+```
+
+---
+
+## 第三部分：功能实现
 
 ## 3. 硬件控制指令详细定义
 
@@ -316,13 +474,13 @@ Golang系统（Ubuntu）[主导] <-串口通信-> STM32[被动执行]
                                    游戏类 退币/彩票键 长按  2000ms
 ```
 
-3. **配置上键按下**：
+4. **配置上键按下**：
 ```
 [0xAA][0x00][0x0C][0x13][序列号][0x02][0x11][0x01][CRC16][0x55]
                                    配置类 上键  按下
 ```
 
-4. **配置组合键（上+确认）**：
+5. **配置组合键（上+确认）**：
 ```
 [0xAA][0x00][0x0D][0x13][序列号][0x02][0x11][0x01][0x15][CRC16][0x55]
                                    配置类 上键  按下  确认键同时按
@@ -462,48 +620,20 @@ struct DeviceStatus {
 - 过载：自动减速或暂停休息
 - 通信异常：自动重连3次
 
-### 5.6 断电数据保护方案
-
-**问题分析**：
-STM32不存储状态，断电后可能丢失少量回币统计数据
-
-**解决方案**：
-
-1. **实时上报 + Go端持久化（推荐）**
-   - STM32：检测到回币立即上报（<10ms）
-   - Golang：收到后立即写入数据库/文件
-   - 优点：STM32完全无状态，架构简单
-   - 缺点：极端情况下可能丢失1-2个币
-
-2. **高频上报策略**
-   - 回币事件触发时立即上报
-   - 每检测到一定数量（5-10个）累计上报
-   - 减少通信次数同时保证数据及时性
-
-3. **接受小概率损失**
-   - 回币率统计是长期数据
-   - 少量数据丢失（<0.1%）对统计影响可忽略
-   - 通过多次游戏累计平均值更准确
-
-**推荐方案**：
-- 采用方案1（实时上报+Go持久化）
-- STM32保持无状态设计
-- Golang端做好数据持久化和统计分析
-
 ## 6. 系统指令
 
 ### 6.1 心跳包（0x31）
 
-**功能**：保持连接活跃，检测通信状态
+**功能**：保持连接活跃，检测通信状态，协商版本
 
 **Golang→STM32（心跳请求）**：
 ```
-[0xAA][长度][0x31][序列号][时间戳:4字节][CRC16][0x55]
+[0xAA][长度][0x31][序列号][时间戳:4字节][版本:2字节][CRC16][0x55]
 ```
 
 **STM32→Golang（心跳响应）**：
 ```
-[0xAA][长度][0x31][序列号][时间戳:4字节][运行时间:4字节][CRC16][0x55]
+[0xAA][长度][0x31][序列号][时间戳:4字节][运行时间:4字节][版本:2字节][CRC16][0x55]
 ```
 
 **心跳策略**：
@@ -511,6 +641,10 @@ STM32不存储状态，断电后可能丢失少量回币统计数据
 - 超时时间：5秒
 - 重试次数：3次
 - 失败处理：标记离线，尝试重连
+
+**版本协商**：
+- 版本字段格式：主版本号(1字节) + 次版本号(1字节)
+- 示例：v1.1 = 0x0101
 
 ### 6.2 ACK/NACK响应
 
@@ -674,6 +808,72 @@ STM32拒绝：[AA][00 0C][81][00 03][03][02][CRC][55]      // NACK：序列号00
    STM32: [状态上报(0x22): 正常] → Golang
 ```
 
+### 7.5 异常恢复流程
+
+#### 通信中断恢复
+1. **检测中断**
+   - Golang：心跳超时3次判定为中断
+   - STM32：60秒无指令判定为中断
+
+2. **自动重连**
+   ```
+   Golang: 检测到中断 → 关闭串口 → 等待1秒 → 重新打开串口
+   STM32: 检测到中断 → 复位串口 → 等待连接
+   ```
+
+3. **状态同步**
+   ```
+   Golang: [状态查询(0x21)] → STM32
+   STM32: [状态上报(0x22)] → Golang
+   Golang: 根据状态决定是否恢复未完成操作
+   ```
+
+#### 数据包处理
+1. **粘包处理**：通过帧头(0xAA)和长度字段分割
+   ```c
+   // STM32端示例
+   void process_rx_buffer(uint8_t* buf, uint16_t len) {
+       static uint8_t frame_buf[512];
+       static uint16_t frame_len = 0;
+       
+       // 查找帧头
+       for (int i = 0; i < len; i++) {
+           if (buf[i] == 0xAA) {
+               // 解析长度
+               uint16_t pkt_len = (buf[i+1] << 8) | buf[i+2];
+               // 提取完整帧
+               if (i + pkt_len <= len) {
+                   process_frame(&buf[i], pkt_len);
+                   i += pkt_len - 1;
+               }
+           }
+       }
+   }
+   ```
+
+2. **半包处理**：缓存不完整数据，等待后续数据
+   ```c
+   if (frame_len + recv_len < expected_len) {
+       // 数据不完整，追加到缓冲区
+       memcpy(&frame_buf[frame_len], recv_buf, recv_len);
+       frame_len += recv_len;
+       return; // 等待更多数据
+   }
+   ```
+
+3. **错包处理**：CRC校验失败直接丢弃，等待重发
+   ```c
+   if (calc_crc != frame->crc) {
+       // CRC错误，发送NACK
+       send_nack(frame->seq, frame->cmd, 0x05);
+       return;
+   }
+   ```
+
+---
+
+## 第四部分：最佳实践
+
 ## 8. STM32实现要求
 
 ### 8.1 基本要求
@@ -820,6 +1020,90 @@ void process_coin_return_detection(void) {
     // 如果有任何位置检测到回币，立即上报
     if (front_coins > 0 || left_coins > 0 || right_coins > 0) {
         send_coin_return_event(front_coins, left_coins, right_coins);
+    }
+}
+```
+
+### 8.6 时序规范汇总
+
+| 操作类型 | 响应时间要求 | 超时处理 | 重试次数 |
+|---------|-------------|---------|---------|
+| 投币检测→ACK | <100ms | 记录错误，继续 | 0 |
+| 命令→ACK | <50ms | 重发命令 | 3 |
+| 心跳→响应 | <5s | 标记离线 | 3 |
+| 上币完成 | <30s | 取消操作 | 0 |
+| 退币完成 | <30s | 人工介入 | 0 |
+| 彩票打印 | <60s | 故障上报 | 1 |
+| 状态查询 | <200ms | 重发查询 | 2 |
+| 故障恢复 | <10s | 人工介入 | 1 |
+
+### 8.7 并发控制
+
+#### 命令执行模式
+- **串行执行**：同类型命令必须串行（如：两个上币命令）
+- **并行执行**：不同类型命令可并行（如：上币+灯光控制）
+
+#### 命令队列管理
+```c
+#define CMD_QUEUE_SIZE     16   // 命令队列深度
+#define HIGH_PRIORITY_QUEUE 4   // 高优先级队列
+
+// 优先级定义
+typedef enum {
+    PRIORITY_URGENT = 0,    // 紧急（故障恢复）
+    PRIORITY_HIGH = 1,      // 高（投币响应）
+    PRIORITY_NORMAL = 2,    // 普通（游戏操作）
+    PRIORITY_LOW = 3        // 低（状态查询）
+} CommandPriority;
+
+// 命令队列结构
+typedef struct {
+    uint8_t cmd;
+    uint16_t seq;
+    uint8_t priority;
+    uint8_t data[256];
+    uint16_t data_len;
+    uint32_t timestamp;
+} Command;
+
+// 队列操作
+void enqueue_command(Command* cmd) {
+    // 根据优先级插入队列
+    if (cmd->priority == PRIORITY_URGENT) {
+        // 插入高优先级队列头部
+        insert_high_priority(cmd);
+    } else {
+        // 插入普通队列
+        insert_normal_queue(cmd);
+    }
+}
+```
+
+#### 资源互斥
+- 电机类操作需要互斥（上币、退币、推币）
+- 传感器读取和电机操作可并行
+```c
+// 资源锁定标志
+typedef struct {
+    bool coin_motor_busy;    // 上币电机忙
+    bool return_motor_busy;  // 退币电机忙
+    bool push_motor_busy;    // 推币电机忙
+    bool printer_busy;       // 彩票机忙
+} ResourceLock;
+
+// 检查资源是否可用
+bool check_resource_available(uint8_t cmd) {
+    switch (cmd) {
+    case 0x01: // 上币
+        return !resource_lock.coin_motor_busy;
+    case 0x02: // 退币
+        return !resource_lock.return_motor_busy;
+    case 0x03: // 彩票
+        return !resource_lock.printer_busy;
+    case 0x04: // 推币
+        return !resource_lock.push_motor_busy;
+    default:
+        return true; // 其他命令不需要资源锁
     }
 }
 ```
@@ -1170,6 +1454,133 @@ func (c *STM32Controller) StartGameSequence(coinCount uint16) {
 }
 ```
 
+### 9.3 数据持久化策略
+
+#### 实时持久化（必须）
+- 投币事件：立即写入数据库
+- 退币/彩票：操作完成后立即记录
+- 故障事件：立即记录并告警
+
+```go
+// 实时持久化示例
+func (c *STM32Controller) persistCriticalData(event Event) {
+    // 使用事务确保数据一致性
+    tx := db.Begin()
+    defer tx.Rollback()
+    
+    switch event.Type {
+    case EVENT_COIN_IN:
+        if err := tx.Create(&CoinRecord{
+            Type: "insert",
+            Count: event.Count,
+            Time: time.Now(),
+        }).Error; err != nil {
+            log.Error("持久化失败:", err)
+            // 写入本地缓存
+            c.cacheQueue.Push(event)
+            return
+        }
+        
+    case EVENT_FAULT:
+        // 故障立即记录并发送告警
+        if err := tx.Create(&FaultRecord{
+            Code: event.FaultCode,
+            Level: event.Level,
+            Time: time.Now(),
+        }).Error; err != nil {
+            log.Error("故障记录失败:", err)
+        }
+        // 发送告警
+        c.sendAlert(event)
+    }
+    
+    tx.Commit()
+}
+```
+
+#### 批量持久化（可选）
+- 回币统计：每10个币或每分钟批量写入
+- 游戏日志：每局结束批量写入
+- 性能数据：每5分钟批量更新
+
+```go
+// 批量持久化示例
+type BatchPersister struct {
+    buffer    []Event
+    maxSize   int
+    interval  time.Duration
+    ticker    *time.Ticker
+}
+
+func (p *BatchPersister) Add(event Event) {
+    p.buffer = append(p.buffer, event)
+    
+    // 达到批量大小，立即持久化
+    if len(p.buffer) >= p.maxSize {
+        p.Flush()
+    }
+}
+
+func (p *BatchPersister) Flush() {
+    if len(p.buffer) == 0 {
+        return
+    }
+    
+    // 批量写入
+    if err := db.CreateInBatches(p.buffer, 100).Error; err != nil {
+        log.Error("批量持久化失败:", err)
+        // 降级到文件存储
+        p.saveToFile(p.buffer)
+    }
+    
+    p.buffer = p.buffer[:0]
+}
+```
+
+#### 持久化失败处理
+1. 本地缓存队列（最大1000条）
+2. 重试机制（指数退避）
+3. 降级到文件存储
+4. 恢复后补充同步
+
+```go
+type PersistenceManager struct {
+    primaryDB   *gorm.DB
+    cacheQueue  *Queue
+    fileBackup  *FileStorage
+    retryPolicy *RetryPolicy
+}
+
+func (m *PersistenceManager) Persist(data interface{}) error {
+    // 1. 尝试写入主数据库
+    if err := m.primaryDB.Create(data).Error; err == nil {
+        return nil
+    }
+    
+    // 2. 写入缓存队列
+    if m.cacheQueue.Size() < 1000 {
+        m.cacheQueue.Push(data)
+    }
+    
+    // 3. 降级到文件存储
+    if err := m.fileBackup.Save(data); err != nil {
+        log.Critical("数据持久化完全失败")
+        return err
+    }
+    
+    // 4. 启动重试任务
+    go m.retryPolicy.Retry(func() error {
+        return m.syncCachedData()
+    })
+    
+    return nil
+}
+```
+
+---
+
+## 第五部分：测试与维护
+
 ## 10. 测试与验证
 
 ### 10.1 功能测试清单
@@ -1198,9 +1609,158 @@ func (c *STM32Controller) StartGameSequence(coinCount uint16) {
 - [ ] 故障状态处理
 - [ ] 缓冲区溢出保护
 
-## 11. 附录
+### 10.4 详细测试用例
 
-### 11.1 CRC16计算
+#### TC001: 投币响应时序测试
+**目的**：验证投币检测到ACK响应时间<100ms
+**步骤**：
+1. 模拟投币信号
+2. 记录STM32上报时间T1
+3. 记录Golang ACK时间T2
+**预期**：T2-T1 < 100ms
+**实际结果**：______
+
+#### TC002: 命令防重测试
+**目的**：验证相同序列号命令不会重复执行
+**步骤**：
+1. 发送上币命令(seq=0x0001, count=5)
+2. 等待ACK确认
+3. 再次发送相同命令(seq=0x0001, count=5)
+**预期**：第二次返回上次结果，不执行上币
+**实际结果**：______
+
+#### TC003: 通信中断恢复测试
+**目的**：验证通信中断后能自动恢复
+**步骤**：
+1. 建立正常通信
+2. 断开串口连接
+3. 等待检测到中断（心跳超时）
+4. 重新连接串口
+5. 发送状态查询
+**预期**：自动重连成功，状态同步正常
+**实际结果**：______
+
+#### TC004: 并发命令测试
+**目的**：验证不同类型命令可以并发执行
+**步骤**：
+1. 同时发送上币命令和灯光控制命令
+2. 观察执行情况
+**预期**：两个命令并行执行，互不影响
+**实际结果**：______
+
+#### TC005: 回币率统计准确性测试
+**目的**：验证回币率计算的准确性
+**步骤**：
+1. 清零统计数据
+2. 模拟回币事件：前方10个，左侧5个，右侧3个
+3. 检查回币率计算结果
+**预期**：回币率 = 10/(10+5+3) = 55.56%
+**实际结果**：______
+
+## 11. 版本管理与兼容性
+
+### 11.1 协议版本
+- 当前版本：v1.1
+- 版本标识：在心跳包中携带版本号
+
+### 11.2 向后兼容原则
+- 新增命令码不影响旧版本
+- 数据字段只能追加，不能修改
+- 必须支持最近3个版本
+
+### 11.3 版本协商
+```
+// 心跳包携带版本信息
+Golang→STM32: [0x31][序列号][时间戳:4][版本:2][CRC]
+STM32→Golang: [0x31][序列号][时间戳:4][运行时间:4][版本:2][CRC]
+```
+
+### 11.4 版本差异处理
+```go
+// 根据版本选择协议处理器
+func (c *STM32Controller) selectProtocolHandler(version uint16) ProtocolHandler {
+    switch version {
+    case 0x0100: // v1.0
+        return &ProtocolV10Handler{}
+    case 0x0101: // v1.1
+        return &ProtocolV11Handler{}
+    default:
+        // 使用最接近的兼容版本
+        return &ProtocolV10Handler{}
+    }
+}
+```
+
+## 12. 故障诊断指南
+
+### 12.1 常见问题诊断
+
+| 症状 | 可能原因 | 诊断方法 | 解决方案 |
+|------|----------|----------|----------|
+| 无法连接 | 串口配置错误 | 检查端口、波特率 | 修改配置文件 |
+| 命令无响应 | 序列号错误 | 查看日志序列号 | 检查序列号生成 |
+| 投币不识别 | 传感器故障 | 状态查询检查传感器 | 更换传感器 |
+| 数据丢失 | 缓冲区溢出 | 检查缓冲区大小 | 增大缓冲区 |
+| 心跳超时 | 网络延迟 | ping测试延迟 | 调整超时时间 |
+
+### 12.2 日志级别配置
+
+```go
+// 日志级别定义
+const (
+    LOG_DEBUG   = 0 // 调试信息
+    LOG_INFO    = 1 // 普通信息
+    LOG_WARNING = 2 // 警告信息
+    LOG_ERROR   = 3 // 错误信息
+    LOG_FATAL   = 4 // 致命错误
+)
+
+// 根据运行环境设置日志级别
+func setLogLevel() {
+    if isProduction() {
+        logger.SetLevel(LOG_WARNING)
+    } else {
+        logger.SetLevel(LOG_DEBUG)
+    }
+}
+```
+
+### 12.3 监控指标
+
+```go
+// 关键监控指标
+type Metrics struct {
+    // 通信指标
+    PacketsSent     uint64
+    PacketsReceived uint64
+    PacketsLost     uint64
+    AvgResponseTime float64
+    
+    // 业务指标
+    TotalCoinsIn    uint64
+    TotalCoinsOut   uint64
+    ReturnRate      float64
+    FaultCount      uint32
+    
+    // 性能指标
+    CPUUsage        float64
+    MemoryUsage     float64
+    QueueDepth      int
+}
+
+// 定期上报监控数据
+func (c *STM32Controller) reportMetrics() {
+    ticker := time.NewTicker(5 * time.Minute)
+    for range ticker.C {
+        metrics := c.collectMetrics()
+        c.sendToMonitoringSystem(metrics)
+    }
+}
+```
+
+## 13. 附录
+
+### 13.1 CRC16计算
 ```c
 uint16_t crc16_xmodem(const uint8_t *data, uint16_t length) {
     uint16_t crc = 0x0000;
@@ -1218,7 +1778,41 @@ uint16_t crc16_xmodem(const uint8_t *data, uint16_t length) {
 }
 ```
 
-### 11.2 常见问题
+### 13.2 命令码速查表
+
+| 分类 | 命令码 | 功能 | 方向 |
+|------|--------|------|------|
+| **控制** | 0x01 | 上币控制 | Go→STM32 |
+| | 0x02 | 退币控制 | Go→STM32 |
+| | 0x03 | 彩票发放 | Go→STM32 |
+| | 0x04 | 推币控制 | Go→STM32 |
+| | 0x05 | 灯光控制 | Go→STM32 |
+| **事件** | 0x11 | 投币检测 | STM32→Go |
+| | 0x12 | 回币检测 | STM32→Go |
+| | 0x13 | 按键事件 | STM32→Go |
+| | 0x14 | 传感器事件 | STM32→Go |
+| **状态** | 0x21 | 状态查询 | Go→STM32 |
+| | 0x22 | 状态上报 | STM32→Go |
+| | 0x23 | 故障上报 | STM32→Go |
+| | 0x24 | 执行进度 | STM32→Go |
+| | 0x25 | 故障恢复 | Go→STM32 |
+| **系统** | 0x31 | 心跳包 | 双向 |
+| | 0x80 | ACK确认 | 双向 |
+| | 0x81 | NACK拒绝 | 双向 |
+
+### 13.3 错误码对照表
+
+| 错误码 | 含义 | 处理建议 |
+|--------|------|----------|
+| 0x01 | 命令不支持 | 检查协议版本 |
+| 0x02 | 参数错误 | 检查参数范围 |
+| 0x03 | 设备忙 | 等待后重试 |
+| 0x04 | 硬件故障 | 检查硬件状态 |
+| 0x05 | 校验失败 | 重新发送 |
+| 0x06 | 超出范围 | 调整参数 |
+| 0x07 | 资源不足 | 补充资源 |
+
+### 13.4 常见问题
 
 **Q: STM32需要保存游戏状态吗？**
 A: 不需要。所有游戏状态由Golang系统管理，STM32断电重启后等待Golang指令即可。
@@ -1232,85 +1826,16 @@ A: STM32硬件层面消抖（建议20ms），确保上报的都是有效投币�
 **Q: 多个事件同时发生怎么办？**
 A: STM32使用事件队列，按时间顺序依次上报，Golang依次处理。
 
----
+**Q: 序列号溢出如何处理？**
+A: 当序列号达到0xFFFF时，下一个序列号回到0x0001（Golang）或0x0002（STM32）。
 
-## 文档信息
-
-**版本**：v1.0  
-**创建日期**：2025-09-12  
-**适用对象**：STM32硬件工程师  
-**上位机环境**：Ubuntu + Golang  
-**通信方式**：串口
-**协议特点**：Golang主导，STM32被动响应
-
-**修订记录**：
-- v1.0：初始版本，定义基础硬件控制协议
-- v2.0：优化版本，根据实际需求完善协议设计
+**Q: 如何保证数据不丢失？**
+A: 关键数据实时持久化，批量数据定期保存，配合本地缓存和文件备份。
 
 ---
 
-## 12. 关键改进总结
+**文档结束**
 
-### 12.1 按键系统优化
-✅ **简化为2个游戏按键**
-- 开始按键：触发上币、开始游戏
-- 退币/彩票按键：根据模式执行不同功能
-- 模式判断由Golang完成，STM32只上报按键事件
-
-### 12.2 STM32无状态设计
-✅ **完全无状态架构**
-- STM32不存储任何状态和数据
-- 模式判断完全由Golang内部完成
-- 同一按键的功能由Golang根据内部模式决定
-
-### 12.3 回币数据优化
-✅ **一次上报三个位置**
-- 数据格式：[前方数量][左侧数量][右侧数量]
-- 减少通信次数，提高效率
-- 前方回币：玩家获得，计入收益
-- 两侧回币：损失，不返还玩家
-
-✅ **Go端统计实现**
-- 所有统计在Golang端实现
-- 实时计算回币率
-- 立即持久化防止断电丢失
-
-### 12.4 执行反馈机制
-✅ **完整的执行流程**
-- 所有硬件操作：ACK确认 → 执行进度 → 完成确认
-- 实时进度上报(0x24)
-- 详细的状态码和错误码定义
-
-### 12.5 断电保护方案
-✅ **实时上报+Go持久化**
-- STM32检测即上报（<10ms）
-- Golang立即写入数据库
-- 接受小概率损失（<0.1%）
-- STM32保持无状态设计
-
-### 12.6 故障恢复机制
-✅ **增强故障处理**
-- 故障恢复指令(0x25)：主动发起恢复
-- 自动恢复机制：卡币反转、卡纸重试等
-- 故障严重级别分类
-- 多种恢复策略：重启、清除、重试、跳过
-
-### 12.6 通信流程优化
-✅ **清晰的流程定义**
-- 完整游戏流程：从投币到结算
-- 模式切换流程
-- 回币率统计流程
-- 故障处理与恢复流程
-
-### 12.7 代码示例完善
-✅ **Golang和STM32实现示例**
-- 按键处理逻辑（含模式判断）
-- 回币率计算和难度调整
-- 统计数据处理
-- 故障恢复处理
-
----
-
-**联系方式**：
-- Golang开发：[系统开发团队]
-- STM32开发：[硬件开发团队]
+如需技术支持，请联系：
+- STM32硬件问题：Qxiong
+- Golang软件问题：xinba
