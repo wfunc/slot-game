@@ -67,7 +67,7 @@ serial:
   # STM32硬件串口
   stm32:
     enabled: true          # 是否启用串口（false时使用模拟控制器）
-    port: "/dev/ttyS3"    # Linux系统串口，Windows使用COM1等
+    port: "/dev/ttyS1"    # Linux系统串口，Windows使用COM1等
     baud_rate: 115200       # 实际波特率（注意base_baud影响）
     data_bits: 8
     stop_bits: 2

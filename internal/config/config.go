@@ -268,6 +268,7 @@ var (
 	once sync.Once
 	mu   sync.RWMutex
 	v    *viper.Viper
+	configFile string // 保存配置文件路径
 )
 
 // Init 初始化配置
@@ -279,11 +280,13 @@ func Init(configPath string) error {
 		// 设置配置文件路径
 		if configPath != "" {
 			v.SetConfigFile(configPath)
+			configFile = configPath
 		} else {
 			v.SetConfigName("config")
 			v.SetConfigType("yaml")
 			v.AddConfigPath("./config")
 			v.AddConfigPath(".")
+			configFile = "./config/config.yaml" // 默认路径
 		}
 		
 		// 设置环境变量前缀
@@ -300,6 +303,9 @@ func Init(configPath string) error {
 			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 				return
 			}
+		} else {
+			// 如果成功读取配置文件，保存实际使用的配置文件路径
+			configFile = v.ConfigFileUsed()
 		}
 		
 		// 解析配置到结构体
@@ -435,4 +441,9 @@ func IsSet(key string) bool {
 // Set 动态设置配置值
 func Set(key string, value interface{}) {
 	v.Set(key, value)
+}
+
+// GetConfigFile 获取配置文件路径
+func GetConfigFile() string {
+	return configFile
 }

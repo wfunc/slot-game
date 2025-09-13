@@ -748,6 +748,6 @@ func printStartInfo(cfg *config.Config) {
 `
 	fmt.Println(banner)
 	fmt.Printf("版本: %s | 模式: %s | PID: %d\n", Version, cfg.Server.Mode, os.Getpid())
-	fmt.Printf("配置文件: %s\n", config.GetString("config_file"))
+	fmt.Printf("配置文件: %s\n", config.GetConfigFile())
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 }

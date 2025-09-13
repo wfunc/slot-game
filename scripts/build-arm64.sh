@@ -215,7 +215,7 @@ Type=simple
 User=sg
 Group=sg
 WorkingDirectory=/home/sg/slot-game
-ExecStart=/home/sg/slot-game/slot-game
+ExecStart=/home/sg/slot-game/slot-game -config=/home/sg/slot-game/config/config.yaml
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/sg/slot-game/logs/service.log
@@ -243,7 +243,7 @@ Type=simple
 User=ztl
 Group=ztl
 WorkingDirectory=/home/ztl/slot-game-arm64
-ExecStart=/home/ztl/slot-game-arm64/slot-game
+ExecStart=/home/ztl/slot-game-arm64/slot-game -config=/home/ztl/slot-game-arm64/config/config.yaml
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/ztl/slot-game-arm64/logs/service.log

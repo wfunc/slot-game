@@ -174,7 +174,7 @@ Type=simple
 User=sg
 Group=sg
 WorkingDirectory=/home/sg/slot-game
-ExecStart=/home/sg/slot-game/slot-game
+ExecStart=/home/sg/slot-game/slot-game -config=/home/sg/slot-game/config/config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
