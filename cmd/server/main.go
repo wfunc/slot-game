@@ -39,7 +39,7 @@ type Server struct {
 	router           *api.Router
 	httpServer       *http.Server
 	recoveryManager  *game.RecoveryManager
-	serialController hardware.SerialController
+	serialController hardware.HardwareController
 	cleanupTicker    *time.Ticker
 	// mqttClient    *mqtt.Client
 	
@@ -310,57 +310,200 @@ func (s *Server) initGameEngine() error {
 // initSerialManager 初始化串口管理器
 func (s *Server) initSerialManager() error {
 	s.logger.Info("初始化串口管理器...")
-	
+
 	// 检查串口配置
 	if !s.cfg.Serial.Enabled {
-		s.logger.Info("串口功能未启用，使用模拟控制器")
-		s.serialController = hardware.NewMockController()
+		s.logger.Info("串口功能未启用，跳过初始化")
 		return nil
 	}
-	
-	// 创建串口配置
-	config := &hardware.STM32Config{
-		Port:              s.cfg.Serial.Port,
-		BaudRate:          s.cfg.Serial.BaudRate,
-		DataBits:          8,
-		StopBits:          2,
-		ReadTimeout:       100 * time.Millisecond,
-		WriteTimeout:      100 * time.Millisecond,
-		HeartbeatInterval: 30 * time.Second,
-		RetryCount:        3,
-	}
-	
-	// 创建串口控制器 (传入 nil 作为 gameLogic，实际游戏逻辑在 gameService 中处理)
-	s.serialController = hardware.NewSTM32Controller(config, nil)
-	
-	// 连接串口
-	if err := s.serialController.Connect(); err != nil {
-		s.logger.Error("串口连接失败，切换到模拟模式", 
-			zap.String("port", s.cfg.Serial.Port),
-			zap.Error(err))
-		// 使用模拟控制器作为降级方案
-		s.serialController = hardware.NewMockController()
+
+	// 检查是否为调试模式（使用模拟控制器）
+	if s.cfg.Serial.MockMode {
+		s.logger.Info("🔧 调试模式：使用模拟控制器")
+		s.serialController = hardware.NewMockController(nil)
 		if err := s.serialController.Connect(); err != nil {
 			return errors.Wrap(err, errors.ErrUnknown, "模拟控制器连接失败")
 		}
+		s.setupSerialCallbacks()
+		s.logger.Info("模拟控制器已启动")
+		return nil
+	}
+
+	// 检查是否有任何串口启用
+	if !s.cfg.Serial.STM32.Enabled && !s.cfg.Serial.ACM.Enabled {
+		s.logger.Info("没有串口被启用")
+		return nil
+	}
+
+	// 为了保持与现有代码的兼容性，使用单个串口控制器
+	// 如果STM32启用，使用STM32控制器
+	if s.cfg.Serial.STM32.Enabled {
+		s.logger.Info("STM32串口功能已启用",
+			zap.String("port", s.cfg.Serial.STM32.Port),
+			zap.Int("baud_rate", s.cfg.Serial.STM32.BaudRate))
+		
+		stm32Config := &hardware.STM32Config{
+			Port:              s.cfg.Serial.STM32.Port,
+			BaudRate:          s.cfg.Serial.STM32.BaudRate,
+			DataBits:          s.cfg.Serial.STM32.DataBits,
+			StopBits:          s.cfg.Serial.STM32.StopBits,
+			ReadTimeout:       s.cfg.Serial.STM32.ReadTimeout,
+			WriteTimeout:      s.cfg.Serial.STM32.WriteTimeout,
+			HeartbeatInterval: s.cfg.Serial.STM32.HeartbeatInterval,
+			RetryCount:        s.cfg.Serial.STM32.RetryTimes,
+		}
+		
+		s.serialController = hardware.NewSTM32Controller(stm32Config, nil)
+	} else if s.cfg.Serial.ACM.Enabled {
+		// 如果只有ACM启用，使用ACM控制器
+		s.logger.Info("ACM串口功能已启用",
+			zap.String("port", s.cfg.Serial.ACM.Port),
+			zap.Int("baud_rate", s.cfg.Serial.ACM.BaudRate),
+			zap.Bool("auto_detect", s.cfg.Serial.ACM.AutoDetect))
+		
+		acmConfig := &hardware.ACMConfig{
+			Port:         s.cfg.Serial.ACM.Port,
+			BaudRate:     s.cfg.Serial.ACM.BaudRate,
+			ReadTimeout:  s.cfg.Serial.ACM.ReadTimeout,
+			WriteTimeout: s.cfg.Serial.ACM.WriteTimeout,
+			AutoDetect:   s.cfg.Serial.ACM.AutoDetect,
+		}
+		
+		s.serialController = hardware.NewACMController(acmConfig)
+	}
+
+	// TODO: 如果需要同时使用两个串口，后续需要实现硬件管理器的完整功能
+
+	// 设置事件回调
+	s.setupSerialCallbacks()
+	
+	// 启动串口连接协程（带重试）
+	s.wg.Add(1)
+	go s.serialConnectWithRetry()
+	
+	s.logger.Info("硬件管理器初始化完成，后台重试连接中...")
+	
+	return nil
+}
+
+// serialConnectWithRetry 串口连接重试逻辑
+func (s *Server) serialConnectWithRetry() {
+	defer s.wg.Done()
+	
+	retryInterval := 5 * time.Second // 初始重试间隔
+	maxRetryInterval := 60 * time.Second // 最大重试间隔
+	retryCount := 0
+	
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.logger.Info("停止串口连接重试")
+			return
+		default:
+			// 检查是否已连接
+			if s.serialController != nil && s.serialController.IsConnected() {
+				// 已连接，定期检查连接状态
+				select {
+				case <-s.ctx.Done():
+					return
+				case <-time.After(10 * time.Second):
+					// 检查连接是否断开
+					if !s.serialController.IsConnected() {
+						s.logger.Warn("串口连接已断开，尝试重新连接")
+					}
+					continue
+				}
+			}
+			
+			// 构建端口信息
+			var ports []string
+			if s.cfg.Serial.STM32.Enabled {
+			 ports = append(ports, fmt.Sprintf("STM32:%s", s.cfg.Serial.STM32.Port))
+			}
+			if s.cfg.Serial.ACM.Enabled {
+			 ports = append(ports, fmt.Sprintf("ACM:%s", s.cfg.Serial.ACM.Port))
+			}
+			
+			// 尝试连接串口
+			s.logger.Info("尝试连接硬件设备...", 
+			zap.Strings("ports", ports),
+				zap.Int("retry_count", retryCount))
+			
+			if err := s.serialController.Connect(); err != nil {
+				retryCount++
+				s.logger.Error("硬件连接失败，稍后重试",
+					zap.Strings("ports", ports),
+					zap.Error(err),
+					zap.Int("retry_count", retryCount),
+					zap.Duration("next_retry_in", retryInterval))
+				
+				// 等待重试
+				select {
+				case <-s.ctx.Done():
+					return
+				case <-time.After(retryInterval):
+					// 递增重试间隔（指数退避）
+					if retryInterval < maxRetryInterval {
+						retryInterval = time.Duration(float64(retryInterval) * 1.5)
+						if retryInterval > maxRetryInterval {
+							retryInterval = maxRetryInterval
+						}
+					}
+				}
+			} else {
+			// 连接成功
+			s.logger.Info("🎉 硬件连接成功！",
+			  zap.Strings("ports", ports),
+			 zap.Bool("connected", s.serialController.IsConnected()),
+			 zap.Int("total_retries", retryCount))
+				
+				// 重置重试参数
+				retryCount = 0
+				retryInterval = 5 * time.Second
+				
+				// TODO: 后续集成游戏服务时发布连接成功事件
+			}
+		}
+	}
+}
+
+// setupSerialCallbacks 设置串口事件回调
+func (s *Server) setupSerialCallbacks() {
+	if s.serialController == nil {
+		return
 	}
 	
-	// 设置事件回调
+	// 投币检测回调
 	s.serialController.SetCoinInsertedCallback(func(count byte) {
-		s.logger.Info("投币检测", zap.Uint8("count", count))
+		s.logger.Info("💰 投币检测", zap.Uint8("count", count))
+		// TODO: 后续集成游戏服务时处理投币事件
 	})
 	
+	// 回币检测回调
 	s.serialController.SetCoinReturnedCallback(func(data *hardware.CoinReturnData) {
-		s.logger.Info("回币检测", 
+		s.logger.Info("🪙 回币检测", 
 			zap.Uint8("front", data.FrontCount),
 			zap.Uint8("left", data.LeftCount),
 			zap.Uint8("right", data.RightCount))
+		// TODO: 后续集成游戏服务时处理回币事件
 	})
 	
-	s.logger.Info("串口管理器初始化完成", 
-		zap.Bool("connected", s.serialController.IsConnected()))
+	// 按键事件回调
+	s.serialController.SetButtonPressedCallback(func(event *hardware.ButtonEvent) {
+		s.logger.Info("🔘 按键事件",
+			zap.Uint8("type", event.KeyType),
+			zap.Uint8("code", event.KeyCode),
+			zap.Uint8("action", event.Action))
+		// TODO: 后续集成游戏服务时处理按键事件
+	})
 	
-	return nil
+	// 故障报告回调
+	s.serialController.SetFaultReportCallback(func(event *hardware.FaultEvent) {
+		s.logger.Error("⚠️ 硬件故障",
+			zap.Uint8("code", event.FaultCode),
+			zap.Uint8("level", event.Level))
+		// TODO: 后续集成游戏服务时处理故障事件
+	})
 }
 
 // startServices 启动服务

@@ -62,6 +62,7 @@ type WebSocketConfig struct {
 // SerialConfig 串口配置
 type SerialConfig struct {
 	Enabled       bool          `mapstructure:"enabled"`
+	MockMode      bool          `mapstructure:"mock_mode"`      // 调试模式（使用模拟控制器）
 	Port          string        `mapstructure:"port"`
 	BaudRate      int           `mapstructure:"baud_rate"`
 	DataBits      int           `mapstructure:"data_bits"`
@@ -71,6 +72,43 @@ type SerialConfig struct {
 	WriteTimeout  time.Duration `mapstructure:"write_timeout"`
 	RetryTimes    int           `mapstructure:"retry_times"`
 	RetryInterval time.Duration `mapstructure:"retry_interval"`
+	STM32         STM32Config   `mapstructure:"stm32"`
+	ACM           ACMConfig     `mapstructure:"acm"`
+	Bridge        BridgeConfig  `mapstructure:"bridge"`
+}
+
+// STM32Config STM32硬件串口配置
+type STM32Config struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	Port              string        `mapstructure:"port"`
+	BaudRate          int           `mapstructure:"baud_rate"`
+	DataBits          int           `mapstructure:"data_bits"`
+	StopBits          int           `mapstructure:"stop_bits"`
+	Parity            string        `mapstructure:"parity"`
+	ReadTimeout       time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout      time.Duration `mapstructure:"write_timeout"`
+	RetryTimes        int           `mapstructure:"retry_times"`
+	RetryInterval     time.Duration `mapstructure:"retry_interval"`
+	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
+}
+
+// ACMConfig ACM算法模块串口配置
+type ACMConfig struct {
+	Enabled      bool          `mapstructure:"enabled"`
+	Port         string        `mapstructure:"port"`
+	BaudRate     int           `mapstructure:"baud_rate"`
+	DataBits     int           `mapstructure:"data_bits"`
+	StopBits     int           `mapstructure:"stop_bits"`
+	Parity       string        `mapstructure:"parity"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	AutoDetect   bool          `mapstructure:"auto_detect"`
+}
+
+// BridgeConfig 桥接模式配置
+type BridgeConfig struct {
+	Enabled     bool `mapstructure:"enabled"`
+	LogMessages bool `mapstructure:"log_messages"`
 }
 
 // MQTTConfig MQTT配置

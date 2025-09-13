@@ -28,7 +28,7 @@ type STM32Config struct {
 func DefaultSTM32Config() *STM32Config {
 	return &STM32Config{
 		Port:         "/dev/ttyS3",
-		BaudRate:     115200,
+		BaudRate:     115200,  // 标准波特率
 		DataBits:     8,
 		StopBits:     2,
 		ReadTimeout:  100 * time.Millisecond,
@@ -141,12 +141,13 @@ func (c *STM32Controller) Connect() error {
 		return nil
 	}
 	
-	// 配置串口 - 8N2配置（8数据位，无校验，2停止位）
+	// 配置串口 - 8O2配置（8数据位，奇校验，2停止位）
 	cfg := &serial.Config{
 		Name:        c.config.Port,
 		Baud:        c.config.BaudRate,
 		Size:        byte(c.config.DataBits),
-		StopBits:    serial.Stop2, // 明确使用2个停止位
+		StopBits:    serial.Stop2,     // 2个停止位
+		Parity:      serial.ParityOdd,  // 奇校验
 		ReadTimeout: c.config.ReadTimeout,
 	}
 	
@@ -562,4 +563,51 @@ func (c *STM32Controller) PushCoin(force int, duration time.Duration) error {
 	
 	// 停止推币
 	return c.StopPushing()
+}
+// PrintTickets 打印彩票
+func (c *STM32Controller) PrintTickets(count uint16) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	
+	// 构造数据
+	data := make([]byte, 2)
+	binary.BigEndian.PutUint16(data, count)
+	
+	// 发送命令
+	return c.sendCommand(CmdTicketPrint, data)
+}
+
+// FaultRecovery 故障恢复
+func (c *STM32Controller) FaultRecovery(faultCode byte, action byte, retryCount byte) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	
+	// 构造数据
+	data := []byte{
+		faultCode,  // 故障代码
+		action,     // 恢复动作
+		retryCount, // 重试次数
+	}
+	
+	// 发送命令
+	return c.sendCommand(CmdFaultRecovery, data)
+}
+
+// LightControl 灯光控制
+func (c *STM32Controller) LightControl(pattern byte, brightness byte, duration byte) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("not connected")
+	}
+	
+	// 构造数据
+	data := []byte{
+		pattern,    // 灯光模式
+		brightness, // 亮度 (0-100)
+		duration,   // 持续时间（秒，0表示持续）
+	}
+	
+	// 发送命令
+	return c.sendCommand(CmdLightControl, data)
 }

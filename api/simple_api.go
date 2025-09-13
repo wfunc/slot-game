@@ -107,8 +107,10 @@ type WebSocketMessage struct {
 
 // SimpleGameAPI 简化版游戏API服务器（不依赖gorilla/mux）
 type SimpleGameAPI struct {
-	engine   *slot.GoldenWildCascadeEngine
-	sessions map[string]*GameSession
+	engine      *slot.GoldenWildCascadeEngine
+	sessions    map[string]*GameSession
+	hardwareAPI *HardwareAPI // 硬件API（可选）
+	mux         *http.ServeMux
 }
 
 // NewSimpleGameAPI 创建简化版游戏API
@@ -157,35 +159,53 @@ func NewSimpleGameAPI() *SimpleGameAPI {
 	return &SimpleGameAPI{
 		engine:   engine,
 		sessions: make(map[string]*GameSession),
+		mux:      http.NewServeMux(),
 	}
 }
 
-// Start 启动HTTP服务器
-func (api *SimpleGameAPI) Start(port string) {
-	mux := http.NewServeMux()
+// RegisterHardwareAPI 注册硬件API
+func (api *SimpleGameAPI) RegisterHardwareAPI(hwAPI *HardwareAPI) {
+	api.hardwareAPI = hwAPI
+	
+	// 注册硬件API路由
+	api.mux.HandleFunc("/api/hardware/status", api.corsWrapper(hwAPI.GetStatus))
+	api.mux.HandleFunc("/api/hardware/dispense", api.corsWrapper(hwAPI.DispenseCoins))
+	api.mux.HandleFunc("/api/hardware/refund", api.corsWrapper(hwAPI.RefundCoins))
+	api.mux.HandleFunc("/api/hardware/ticket", api.corsWrapper(hwAPI.PrintTickets))
+	api.mux.HandleFunc("/api/hardware/push", api.corsWrapper(hwAPI.PushControl))
+	api.mux.HandleFunc("/api/hardware/light", api.corsWrapper(hwAPI.LightControl))
+	api.mux.HandleFunc("/api/hardware/mode", api.corsWrapper(hwAPI.SetMode))
+	api.mux.HandleFunc("/api/hardware/difficulty", api.corsWrapper(hwAPI.SetDifficulty))
+	api.mux.HandleFunc("/api/hardware/fault", api.corsWrapper(hwAPI.FaultRecovery))
+	api.mux.HandleFunc("/api/hardware/stats", api.corsWrapper(hwAPI.GetStatistics))
+}
 
-	// 设置路由
-	mux.HandleFunc("/health", api.corsWrapper(api.HealthCheck))
-	mux.HandleFunc("/api/v1/session", api.corsWrapper(api.SessionHandler))
-	mux.HandleFunc("/api/v1/session/", api.corsWrapper(api.SessionHandler))
-	mux.HandleFunc("/api/v1/spin", api.corsWrapper(api.SpinHandler))
-	mux.HandleFunc("/api/v1/stats/", api.corsWrapper(api.StatsHandler))
+// Start 启动HTTP服务器
+func (api *SimpleGameAPI) Start(port string) error {
+	// 设置游戏API路由
+	api.mux.HandleFunc("/health", api.corsWrapper(api.HealthCheck))
+	api.mux.HandleFunc("/api/game/session", api.corsWrapper(api.SessionHandler))
+	api.mux.HandleFunc("/api/game/session/", api.corsWrapper(api.SessionHandler))
+	api.mux.HandleFunc("/api/spin", api.corsWrapper(api.SpinHandler))
+	api.mux.HandleFunc("/api/stats", api.corsWrapper(api.StatsHandler))
+	
+	// 兼容旧版API路径
+	api.mux.HandleFunc("/api/v1/session", api.corsWrapper(api.SessionHandler))
+	api.mux.HandleFunc("/api/v1/session/", api.corsWrapper(api.SessionHandler))
+	api.mux.HandleFunc("/api/v1/spin", api.corsWrapper(api.SpinHandler))
+	api.mux.HandleFunc("/api/v1/stats/", api.corsWrapper(api.StatsHandler))
 
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      mux,
+		Handler:      api.mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("🚀 金色Wild麻将拉霸机API服务器启动在端口 :%s", port)
-	log.Printf("🌐 健康检查: http://localhost:%s/health", port)
-	log.Printf("📋 API接口: http://localhost:%s/api/v1/", port)
-
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("❌ 服务器启动失败: %v", err)
-	}
+	log.Printf("🚀 游戏API服务器启动在端口 :%s", port)
+	
+	return server.ListenAndServe()
 }
 
 // corsWrapper CORS包装器

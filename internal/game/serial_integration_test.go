@@ -46,7 +46,7 @@ func (m *MockSerialController) RefundCoins(count uint16) error {
 }
 
 // 彩票控制
-func (m *MockSerialController) DispenseTickets(count uint16) error {
+func (m *MockSerialController) PrintTickets(count uint16) error {
 	return nil
 }
 
@@ -59,7 +59,7 @@ func (m *MockSerialController) StopPushing() error {
 	return nil
 }
 
-func (m *MockSerialController) SinglePush(times byte) error {
+func (m *MockSerialController) PushControl(action byte, param byte) error {
 	return nil
 }
 
@@ -68,19 +68,7 @@ func (m *MockSerialController) SetPushSpeed(speed byte) error {
 }
 
 // 灯光控制
-func (m *MockSerialController) SetLights(lightBits byte) error {
-	return nil
-}
-
-func (m *MockSerialController) TurnOnLight(light byte) error {
-	return nil
-}
-
-func (m *MockSerialController) TurnOffAllLights() error {
-	return nil
-}
-
-func (m *MockSerialController) TurnOnAllLights() error {
+func (m *MockSerialController) LightControl(pattern byte, brightness byte, duration byte) error {
 	return nil
 }
 
@@ -103,7 +91,7 @@ func (m *MockSerialController) ResetStatistics() {
 }
 
 // 故障恢复
-func (m *MockSerialController) RecoverFault(faultCode byte, action byte, param byte) error {
+func (m *MockSerialController) FaultRecovery(faultCode byte, action byte, retryCount byte) error {
 	return nil
 }
 

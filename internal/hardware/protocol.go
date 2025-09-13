@@ -71,14 +71,16 @@ const (
 
 // 灯光位定义
 const (
-	LightOff  byte = 0x20 // 关
-	Light1    byte = 0x22 // 灯1
-	Light2    byte = 0x30 // 灯2
-	Light3    byte = 0x24 // 灯3
-	Light4    byte = 0x28 // 灯4
-	Light5    byte = 0x21 // 灯5
-	LightAll  byte = 0x7F // 所有灯
-	LightNone byte = 0x40 // 所有灯关闭
+	LightOff   byte = 0x20 // 关
+	LightOn    byte = 0x7F // 开（所有灯）
+	LightFlash byte = 0xFF // 闪烁模式
+	Light1     byte = 0x22 // 灯1
+	Light2     byte = 0x30 // 灯2
+	Light3     byte = 0x24 // 灯3
+	Light4     byte = 0x28 // 灯4
+	Light5     byte = 0x21 // 灯5
+	LightAll   byte = 0x7F // 所有灯
+	LightNone  byte = 0x40 // 所有灯关闭
 )
 
 // 传感器类型
@@ -157,6 +159,10 @@ type Frame struct {
 
 // DeviceStatus 设备状态结构
 type DeviceStatus struct {
+	DeviceType    byte   // 设备类型
+	FirmwareVer   uint16 // 固件版本
+	StatusFlags   byte   // 状态标志位
+	ErrorCode     byte   // 错误码
 	CoinMotor     byte   // 上币电机状态
 	ReturnMotor   byte   // 退币电机状态
 	PushMotor     byte   // 推币电机状态
@@ -165,6 +171,8 @@ type DeviceStatus struct {
 	TicketCount   uint16 // 彩票余量
 	Temperature   byte   // 设备温度
 	ErrorFlags    byte   // 错误标志位
+	Voltage       uint16 // 电压（毫伏）
+	RunTime       uint32 // 运行时间（秒）
 }
 
 // CoinReturnData 回币数据（优化后的格式）
@@ -186,6 +194,7 @@ type ButtonEvent struct {
 type FaultEvent struct {
 	FaultCode  byte   // 故障码
 	Level      byte   // 严重级别
+	Timestamp  uint32 // 时间戳
 	ExtraInfo  []byte // 附加信息
 }
 

@@ -12,6 +12,10 @@ server:
 
 # 数据库配置
 database:
+  # 适配器类型: "standalone" (单机版) 或 "online" (线上版)
+  adapter_type: "standalone"
+  
+  # 原有配置（用于兼容）
   driver: "sqlite"
   dsn: "./data/slot-game.db"
   max_idle_conns: 10
@@ -19,11 +23,34 @@ database:
   conn_max_lifetime: 1h
   log_level: "info" # silent, error, warn, info
   auto_migrate: true
+  
+  # 单机版配置（SQLite）
+  standalone:
+    path: "./data/slot-game.db"
+  
+  # 线上版配置（PostgreSQL + Redis）- 暂未启用
+  online:
+    postgresql:
+      host: "localhost"
+      port: 5432
+      user: "slot_game"
+      password: "password"
+      database: "slot_game_db"
+      ssl_mode: "disable"
+      max_conns: 25
+    redis:
+      host: "localhost"
+      port: 6379
+      password: ""
+      db: 0
+      pool_size: 10
 
 # WebSocket配置
+# 注意：当前WebSocket通过主HTTP服务器提供（端口8080的/ws路径）
+# 下面的独立端口配置暂未使用
 websocket:
   host: "0.0.0.0"
-  port: 8081
+  port: 8081  # 未使用 - WebSocket实际通过 http://localhost:8080/ws/game 访问
   path: "/ws"
   read_buffer_size: 1024
   write_buffer_size: 1024
@@ -35,15 +62,48 @@ websocket:
 
 # 串口配置
 serial:
-  port: "/dev/ttyUSB0"
-  baud_rate: 115200
+  enabled: true          # 是否启用串口功能
+  mock_mode: false       # 调试模式（true时使用模拟控制器，false时连接真实硬件）
+  port: "/dev/ttyS3"     # Linux系统串口，Windows使用COM1等
+  baud_rate: 115200      # 波特率
   data_bits: 8
-  stop_bits: 1
-  parity: "N" # N-无校验, O-奇校验, E-偶校验
+  stop_bits: 2
+  parity: "N"            # N-无校验, O-奇校验, E-偶校验
   read_timeout: 1s
   write_timeout: 1s
   retry_times: 3
   retry_interval: 500ms
+  
+  # STM32硬件串口（扩展配置）
+  stm32:
+    enabled: true          # 是否启用STM32通信
+    port: "/dev/ttyS3"     # STM32串口
+    baud_rate: 115200      # 实际波特率（注意base_baud影响）
+    data_bits: 8
+    stop_bits: 2
+    parity: "N"
+    read_timeout: 100ms
+    write_timeout: 100ms
+    retry_times: 3
+    retry_interval: 500ms
+    heartbeat_interval: 30s
+  
+  # ACM算法模块串口
+  acm:
+    enabled: true         # 是否启用ACM设备
+    port: "auto"          # "auto"自动检测，或指定如"/dev/ttyACM0"
+    baud_rate: 115200
+    data_bits: 8
+    stop_bits: 2
+    parity: "N"           # N-无校验
+    read_timeout: 100ms
+    write_timeout: 100ms
+    auto_detect: true     # 自动检测ACM设备
+  
+  # 桥接模式配置
+  bridge:
+    enabled: false         # 启用ACM<->STM32桥接
+    log_messages: false   # 是否记录桥接消息
 
 # MQTT配置
 mqtt:

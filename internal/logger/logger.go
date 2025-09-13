@@ -384,3 +384,21 @@ func Cleanup() {
 		fmt.Printf("Failed to sync logger: %v\n", err)
 	}
 }
+
+// InitLogger 简化的日志初始化（用于测试）
+func InitLogger(level string, filename string) {
+	cfg := &config.LogConfig{
+		Level:  level,
+		Format: "console",
+		Output: "both",
+		File: config.LogFileConfig{
+			Path:       "./logs",
+			Filename:   filename,
+			MaxSize:    100,
+			MaxBackups: 3,
+			MaxAge:     7,
+			Compress:   false,
+		},
+	}
+	Init(cfg)
+}

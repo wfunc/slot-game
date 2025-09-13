@@ -62,16 +62,38 @@ websocket:
 
 # 串口配置
 serial:
-  enabled: false          # 是否启用串口（false时使用模拟控制器）
-  port: "/dev/ttyUSB0"    # Linux系统串口，Windows使用COM1等
-  baud_rate: 115200
-  data_bits: 8
-  stop_bits: 1
-  parity: "N" # N-无校验, O-奇校验, E-偶校验
-  read_timeout: 1s
-  write_timeout: 1s
-  retry_times: 3
-  retry_interval: 500ms
+  enabled: true          # 是否启用串口（false时使用模拟控制器）
+  
+  # STM32硬件串口
+  stm32:
+    enabled: true          # 是否启用串口（false时使用模拟控制器）
+    port: "/dev/ttyS3"    # Linux系统串口，Windows使用COM1等
+    baud_rate: 115200       # 实际波特率（注意base_baud影响）
+    data_bits: 8
+    stop_bits: 2
+    parity: "N"
+    read_timeout: 100ms
+    write_timeout: 100ms
+    retry_times: 3
+    retry_interval: 500ms
+    heartbeat_interval: 30s
+  
+  # ACM算法模块串口
+  acm:
+    enabled: true         # 是否启用ACM设备
+    port: "auto"          # "auto"自动检测，或指定如"/dev/ttyACM0"
+    baud_rate: 115200
+    data_bits: 8
+    stop_bits: 2
+    parity: "N"           # N-无校验
+    read_timeout: 100ms
+    write_timeout: 100ms
+    auto_detect: true     # 自动检测ACM设备
+  
+  # 桥接模式配置
+  bridge:
+    enabled: false         # 启用ACM<->STM32桥接
+    log_messages: false   # 是否记录桥接消息
 
 # MQTT配置
 mqtt:

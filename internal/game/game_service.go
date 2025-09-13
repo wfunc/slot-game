@@ -20,7 +20,7 @@ type GameService struct {
 	userRepo         repository.UserRepository
 	walletRepo       repository.WalletRepository
 	gameResultRepo   repository.GameResultRepository
-	serialController hardware.SerialController
+	serialController hardware.HardwareController
 	logger           *zap.Logger
 	db               *gorm.DB
 }
@@ -31,7 +31,7 @@ type GameServiceConfig struct {
 	Logger           *zap.Logger
 	SessionTimeout   time.Duration
 	MaxSessions      int
-	SerialController hardware.SerialController // 可选的串口控制器
+	SerialController hardware.HardwareController // 可选的串口控制器
 }
 
 // NewGameService 创建游戏服务

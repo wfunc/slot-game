@@ -155,6 +155,26 @@ build-arm64:
 	@bash scripts/build-arm64.sh
 	@echo "$(GREEN)ARM64版本构建完成$(NC)"
 
+# 构建串口测试工具 (ARM64)
+build-serial-tools:
+	@echo "$(GREEN)构建串口测试工具 (ARM64)...$(NC)"
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/serial-scan-arm64 cmd/serial-scan/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/serial-test-arm64 cmd/serial-test/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/serial-detect-arm64 cmd/serial-detect/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/serial-monitor-arm64 cmd/serial-monitor/main.go
+	@echo "$(GREEN)串口工具构建完成:$(NC)"
+	@echo "  - $(BIN_DIR)/serial-scan-arm64 (串口扫描)"
+	@echo "  - $(BIN_DIR)/serial-test-arm64 (串口测试)"
+	@echo "  - $(BIN_DIR)/serial-detect-arm64 (参数自动检测)"
+	@echo "  - $(BIN_DIR)/serial-monitor-arm64 (数据监听)"
+	@echo ""
+	@echo "使用方法:"
+	@echo "  1. 扫描串口: ./serial-scan-arm64"
+	@echo "  2. 自动检测参数: ./serial-detect-arm64 -port /dev/ttyS3"
+	@echo "  3. 监听数据: ./serial-monitor-arm64 -port /dev/ttyS3 -baud 9600"
+	@echo "  4. 测试通信: ./serial-test-arm64 -port /dev/ttyS3 -mode stm32"
+
 # 构建Linux AMD64版本
 build-linux:
 	@echo "$(GREEN)构建Linux AMD64版本...$(NC)"
