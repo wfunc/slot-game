@@ -20,12 +20,12 @@ type ACMConfig struct {
 	ReadTimeout  time.Duration // 读超时
 	WriteTimeout time.Duration // 写超时
 	AutoDetect   bool          // 是否自动检测设备
-	
+
 	// Algo命令定时器配置
 	AlgoTimerEnabled  bool          // 是否启用algo定时器
 	AlgoTimerInterval time.Duration // algo命令发送间隔
-	AlgoBet          int           // algo命令的bet参数
-	AlgoPrize        int           // algo命令的prize参数
+	AlgoBet           int           // algo命令的bet参数
+	AlgoPrize         int           // algo命令的prize参数
 }
 
 // DefaultACMConfig 默认ACM配置
@@ -39,8 +39,8 @@ func DefaultACMConfig() *ACMConfig {
 		// Algo定时器默认配置
 		AlgoTimerEnabled:  false,
 		AlgoTimerInterval: 5 * time.Second,
-		AlgoBet:          1,
-		AlgoPrize:        100,
+		AlgoBet:           1,
+		AlgoPrize:         100,
 	}
 }
 
@@ -63,7 +63,7 @@ type ACMController struct {
 
 	// STM32控制器引用（用于桥接）
 	stm32Controller *STM32Controller
-	
+
 	// Algo定时器
 	algoTimer       *time.Ticker
 	algoTimerStopCh chan struct{}
@@ -148,8 +148,17 @@ func (c *ACMController) Connect() error {
 		zap.String("port", c.config.Port),
 		zap.Int("baudrate", c.config.BaudRate))
 
+	// 等待设备就绪并发送help命令
+	time.Sleep(200 * time.Millisecond)
+	c.logger.Info("发送help命令查询支持的命令列表")
+	if _, err := c.SendCommand("help"); err != nil {
+		c.logger.Warn("发送help命令失败", zap.Error(err))
+	}
+
 	// 启动Algo定时器（如果启用）
 	if c.config.AlgoTimerEnabled {
+		// 延迟启动，等help命令响应完成
+		time.Sleep(500 * time.Millisecond)
 		c.startAlgoTimer()
 		c.logger.Info("Algo定时器已启动",
 			zap.Duration("interval", c.config.AlgoTimerInterval),
@@ -201,11 +210,10 @@ func (c *ACMController) IsConnected() bool {
 // findACMDevice 自动查找ACM设备
 func (c *ACMController) findACMDevice() string {
 	c.logger.Info("开始自动检测ACM设备...")
-	
+
 	// Linux设备路径
 	patterns := []string{
 		"/dev/ttyACM*",
-		"/dev/ttyUSB*",
 	}
 
 	for _, pattern := range patterns {
@@ -272,7 +280,7 @@ func (c *ACMController) readLoop() {
 			if n > 0 {
 				receivedData := string(buffer[:n])
 				msgBuffer += receivedData
-				
+
 				// 打印原始接收数据（十六进制和ASCII）
 				c.logger.Debug("ACM接收原始数据",
 					zap.String("ascii", receivedData),
@@ -290,7 +298,13 @@ func (c *ACMController) readLoop() {
 					msgBuffer = msgBuffer[idx+1:]
 
 					if msg != "" {
-						c.logger.Info("ACM接收完整消息", zap.String("message", msg))
+						// 记录所有消息，帮助了解ACM设备的响应格式
+						if strings.Contains(msg, "help") || strings.Contains(msg, "Help") ||
+						   strings.Contains(msg, "command") || strings.Contains(msg, "Command") {
+							c.logger.Info("ACM帮助信息", zap.String("message", msg))
+						} else {
+							c.logger.Debug("ACM接收消息", zap.String("message", msg))
+						}
 						c.processMessage(msg)
 					}
 				}
@@ -338,6 +352,19 @@ func (c *ACMController) handleJSONMessage(msg map[string]interface{}) {
 func (c *ACMController) handleCommand(cmd string) {
 	// 移除可能的结束符
 	cmd = strings.TrimSuffix(cmd, ">")
+	cmd = strings.TrimSpace(cmd)
+
+	// 忽略空命令和提示符
+	if cmd == "" || cmd == ">" {
+		return
+	}
+
+	// 忽略ACM设备的错误响应，避免循环
+	if strings.Contains(cmd, "Command not recognised") || 
+	   strings.Contains(cmd, "Enter 'help'") {
+		c.logger.Debug("忽略ACM错误响应", zap.String("message", cmd))
+		return
+	}
 
 	var response interface{}
 	var err error
@@ -806,10 +833,10 @@ func (c *ACMController) startAlgoTimer() {
 
 	go func() {
 		c.logger.Info("Algo定时器线程已启动")
-		
+
 		// 立即发送第一个命令
 		c.sendAlgoCommandAsync()
-		
+
 		for {
 			select {
 			case <-c.algoTimer.C:
@@ -842,22 +869,22 @@ func (c *ACMController) stopAlgoTimer() {
 func (c *ACMController) sendAlgoCommandAsync() {
 	go func() {
 		cmd := fmt.Sprintf("algo -b %d -p %d", c.config.AlgoBet, c.config.AlgoPrize)
-		
-		c.logger.Debug("定时发送algo命令", 
+
+		c.logger.Debug("定时发送algo命令",
 			zap.String("command", cmd),
 			zap.Time("timestamp", time.Now()))
-		
+
 		// 发送命令并获取响应
 		response, err := c.SendAlgoCommand(c.config.AlgoBet, c.config.AlgoPrize)
 		if err != nil {
-			c.logger.Error("定时algo命令执行失败", 
+			c.logger.Error("定时algo命令执行失败",
 				zap.Error(err),
 				zap.String("command", cmd))
 			return
 		}
-		
+
 		// 记录响应
-		c.logger.Info("定时algo命令响应", 
+		c.logger.Info("定时algo命令响应",
 			zap.Any("response", response),
 			zap.Float64("win", response["win"].(float64)),
 			zap.Int("hp30", response["hp30"].(int)))
@@ -904,7 +931,7 @@ func (c *ACMController) StartAlgoTimer() error {
 
 	c.config.AlgoTimerEnabled = true
 	c.startAlgoTimer()
-	
+
 	return nil
 }
 
@@ -915,6 +942,6 @@ func (c *ACMController) StopAlgoTimer() {
 
 	c.config.AlgoTimerEnabled = false
 	c.stopAlgoTimer()
-	
+
 	c.logger.Info("Algo定时器已停止")
 }
