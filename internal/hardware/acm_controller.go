@@ -158,15 +158,13 @@ func (c *ACMController) Connect() error {
 	// 清空可能的缓冲区数据
 	c.port.Flush()
 	
-	// 发送测试命令
-	c.logger.Info("发送测试命令")
-	if err := c.SendCommand("ver"); err != nil {
-		c.logger.Warn("发送测试命令失败", zap.Error(err))
-	}
+	// 不发送初始命令，设备可能不识别
+	// 根据测试工具的行为，直接等待用户命令或定时器命令
+	c.logger.Info("ACM设备就绪，等待命令")
 
 	// 启动Algo定时器（如果启用）
 	if c.config.AlgoTimerEnabled {
-		// 延迟启动，等help命令响应完成
+		// 延迟启动，确保设备完全就绪
 		time.Sleep(500 * time.Millisecond)
 		c.startAlgoTimer()
 		c.logger.Info("Algo定时器已启动",
@@ -307,17 +305,26 @@ func (c *ACMController) readLoop() {
 			// 读取数据
 			n, err := c.port.Read(buffer)
 			if err != nil {
-				// EOF表示连接断开
-				if err.Error() == "EOF" || strings.Contains(err.Error(), "EOF") {
-					c.logger.Error("ACM连接断开(EOF)，退出读取循环")
-					c.mu.Lock()
-					c.connected = false
-					c.mu.Unlock()
-					return
+				// 重要：EOF不是致命错误，某些USB-CDC设备会定期发送EOF
+				// 参考测试工具的实现，EOF应该被忽略
+				if strings.Contains(err.Error(), "EOF") {
+					// EOF是正常的，继续读取
+					continue
 				}
 				// 忽略超时错误
 				if !strings.Contains(err.Error(), "timeout") {
 					c.logger.Debug("读取ACM数据错误", zap.Error(err))
+				}
+				// 只有在真正的错误时才考虑断开
+				// 例如：device not configured, broken pipe等
+				if strings.Contains(err.Error(), "device not configured") || 
+				   strings.Contains(err.Error(), "broken pipe") ||
+				   strings.Contains(err.Error(), "input/output error") {
+					c.logger.Error("ACM设备断开连接", zap.Error(err))
+					c.mu.Lock()
+					c.connected = false
+					c.mu.Unlock()
+					return
 				}
 				// 短暂休眠避免CPU占用过高
 				time.Sleep(10 * time.Millisecond)
@@ -562,7 +569,22 @@ func (c *ACMController) processLoop() {
 				c.logger.Info("命令通道已关闭，退出处理循环")
 				return
 			}
-			c.handleCommand(cmd)
+			// 重要修复：发送命令到串口，而不是处理它
+			// 使用\r\n作为行尾符，与测试工具一致
+			cmdBytes := []byte(cmd + "\r\n")
+			c.logger.Debug("发送命令到ACM设备",
+				zap.String("command", cmd),
+				zap.String("hex", fmt.Sprintf("% X", cmdBytes)),
+				zap.Int("bytes", len(cmdBytes)))
+			
+			if c.port != nil {
+				n, err := c.port.Write(cmdBytes)
+				if err != nil {
+					c.logger.Error("发送命令失败", zap.Error(err))
+				} else {
+					c.logger.Debug("命令发送成功", zap.Int("bytes_written", n))
+				}
+			}
 		case resp, ok := <-c.respCh:
 			if !ok {
 				c.logger.Info("响应通道已关闭，退出处理循环")
@@ -783,7 +805,7 @@ func (c *ACMController) SendAlgoCommand(bet int, prize int) (map[string]interfac
 
 	// 构建命令
 	cmd := fmt.Sprintf("algo -b %d -p %d", bet, prize)
-	cmdBytes := []byte(cmd + "\n")
+	cmdBytes := []byte(cmd + "\r\n")  // 修复：使用\r\n与测试工具一致
 
 	// 打印发送的命令（ASCII和十六进制）
 	c.logger.Info("ACM发送algo命令",
