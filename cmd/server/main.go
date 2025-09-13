@@ -39,7 +39,9 @@ type Server struct {
 	router           *api.Router
 	httpServer       *http.Server
 	recoveryManager  *game.RecoveryManager
-	serialController hardware.HardwareController
+	serialController hardware.HardwareController  // 主控制器（STM32或ACM）
+	stm32Controller  *hardware.STM32Controller    // STM32控制器
+	acmController    *hardware.ACMController      // ACM控制器
 	cleanupTicker    *time.Ticker
 	// mqttClient    *mqtt.Client
 	
@@ -311,6 +313,18 @@ func (s *Server) initGameEngine() error {
 func (s *Server) initSerialManager() error {
 	s.logger.Info("初始化串口管理器...")
 
+	// 打印完整的串口配置用于调试
+	s.logger.Info("串口配置详情",
+		zap.Bool("serial.enabled", s.cfg.Serial.Enabled),
+		zap.Bool("serial.mock_mode", s.cfg.Serial.MockMode),
+		zap.Bool("serial.stm32.enabled", s.cfg.Serial.STM32.Enabled),
+		zap.String("serial.stm32.port", s.cfg.Serial.STM32.Port),
+		zap.Bool("serial.acm.enabled", s.cfg.Serial.ACM.Enabled),
+		zap.String("serial.acm.port", s.cfg.Serial.ACM.Port),
+		zap.Bool("serial.acm.auto_detect", s.cfg.Serial.ACM.AutoDetect),
+		zap.Bool("serial.acm.algo_timer_enabled", s.cfg.Serial.ACM.AlgoTimerEnabled),
+		zap.Duration("serial.acm.algo_timer_interval", s.cfg.Serial.ACM.AlgoTimerInterval))
+
 	// 检查串口配置
 	if !s.cfg.Serial.Enabled {
 		s.logger.Info("串口功能未启用，跳过初始化")
@@ -331,12 +345,11 @@ func (s *Server) initSerialManager() error {
 
 	// 检查是否有任何串口启用
 	if !s.cfg.Serial.STM32.Enabled && !s.cfg.Serial.ACM.Enabled {
-		s.logger.Info("没有串口被启用")
+		s.logger.Info("没有串口被启用（STM32和ACM都未启用）")
 		return nil
 	}
 
-	// 为了保持与现有代码的兼容性，使用单个串口控制器
-	// 如果STM32启用，使用STM32控制器
+	// 初始化STM32控制器
 	if s.cfg.Serial.STM32.Enabled {
 		s.logger.Info("STM32串口功能已启用",
 			zap.String("port", s.cfg.Serial.STM32.Port),
@@ -353,13 +366,24 @@ func (s *Server) initSerialManager() error {
 			RetryCount:        s.cfg.Serial.STM32.RetryTimes,
 		}
 		
-		s.serialController = hardware.NewSTM32Controller(stm32Config, nil)
-	} else if s.cfg.Serial.ACM.Enabled {
-		// 如果只有ACM启用，使用ACM控制器
-		s.logger.Info("ACM串口功能已启用",
+		s.stm32Controller = hardware.NewSTM32Controller(stm32Config, nil)
+		s.serialController = s.stm32Controller // 设置为主控制器
+	}
+	
+	// 初始化ACM控制器
+	s.logger.Info("检查ACM配置", 
+		zap.Bool("acm.enabled", s.cfg.Serial.ACM.Enabled),
+		zap.Any("acm_config", s.cfg.Serial.ACM))
+	
+	if s.cfg.Serial.ACM.Enabled {
+		s.logger.Info("开始初始化ACM控制器",
 			zap.String("port", s.cfg.Serial.ACM.Port),
 			zap.Int("baud_rate", s.cfg.Serial.ACM.BaudRate),
-			zap.Bool("auto_detect", s.cfg.Serial.ACM.AutoDetect))
+			zap.Bool("auto_detect", s.cfg.Serial.ACM.AutoDetect),
+			zap.Bool("algo_timer", s.cfg.Serial.ACM.AlgoTimerEnabled),
+			zap.Duration("algo_interval", s.cfg.Serial.ACM.AlgoTimerInterval),
+			zap.Int("algo_bet", s.cfg.Serial.ACM.AlgoBet),
+			zap.Int("algo_prize", s.cfg.Serial.ACM.AlgoPrize))
 		
 		acmConfig := &hardware.ACMConfig{
 			Port:         s.cfg.Serial.ACM.Port,
@@ -367,12 +391,36 @@ func (s *Server) initSerialManager() error {
 			ReadTimeout:  s.cfg.Serial.ACM.ReadTimeout,
 			WriteTimeout: s.cfg.Serial.ACM.WriteTimeout,
 			AutoDetect:   s.cfg.Serial.ACM.AutoDetect,
+			// Algo定时器配置
+			AlgoTimerEnabled:  s.cfg.Serial.ACM.AlgoTimerEnabled,
+			AlgoTimerInterval: s.cfg.Serial.ACM.AlgoTimerInterval,
+			AlgoBet:          s.cfg.Serial.ACM.AlgoBet,
+			AlgoPrize:        s.cfg.Serial.ACM.AlgoPrize,
 		}
 		
-		s.serialController = hardware.NewACMController(acmConfig)
+		s.logger.Info("创建ACM控制器对象", zap.Any("config", acmConfig))
+		s.acmController = hardware.NewACMController(acmConfig)
+		
+		if s.acmController == nil {
+			s.logger.Error("ACM控制器创建失败：返回nil")
+		} else {
+			s.logger.Info("ACM控制器创建成功")
+		}
+		
+		// 如果没有STM32，使用ACM作为主控制器
+		if s.serialController == nil {
+			s.serialController = s.acmController
+			s.logger.Info("设置ACM为主串口控制器")
+		}
+		
+		// 设置桥接（如果两个都启用）
+		if s.stm32Controller != nil && s.cfg.Serial.Bridge.Enabled {
+			s.acmController.SetSTM32Controller(s.stm32Controller)
+			s.logger.Info("ACM<->STM32桥接模式已启用")
+		}
+	} else {
+		s.logger.Info("ACM未启用，跳过初始化")
 	}
-
-	// TODO: 如果需要同时使用两个串口，后续需要实现硬件管理器的完整功能
 
 	// 设置事件回调
 	s.setupSerialCallbacks()
@@ -400,17 +448,17 @@ func (s *Server) serialConnectWithRetry() {
 			s.logger.Info("停止串口连接重试")
 			return
 		default:
-			// 检查是否已连接
-			if s.serialController != nil && s.serialController.IsConnected() {
-				// 已连接，定期检查连接状态
+			// 检查STM32和ACM是否都已连接
+			stm32Connected := s.stm32Controller == nil || s.stm32Controller.IsConnected()
+			acmConnected := s.acmController == nil || s.acmController.IsConnected()
+			
+			if stm32Connected && acmConnected {
+				// 都已连接，定期检查连接状态
 				select {
 				case <-s.ctx.Done():
 					return
 				case <-time.After(10 * time.Second):
-					// 检查连接是否断开
-					if !s.serialController.IsConnected() {
-						s.logger.Warn("串口连接已断开，尝试重新连接")
-					}
+					// 继续检查
 					continue
 				}
 			}
@@ -429,11 +477,60 @@ func (s *Server) serialConnectWithRetry() {
 			zap.Strings("ports", ports),
 				zap.Int("retry_count", retryCount))
 			
-			if err := s.serialController.Connect(); err != nil {
+			// 打印控制器状态
+			s.logger.Info("控制器状态检查",
+				zap.Bool("stm32_controller_exists", s.stm32Controller != nil),
+				zap.Bool("acm_controller_exists", s.acmController != nil),
+				zap.Bool("stm32_connected", s.stm32Controller != nil && s.stm32Controller.IsConnected()),
+				zap.Bool("acm_connected", s.acmController != nil && s.acmController.IsConnected()))
+			
+			// 连接STM32
+			var connectError error
+			if s.stm32Controller != nil && !s.stm32Controller.IsConnected() {
+				s.logger.Info("尝试连接STM32...", zap.String("port", s.cfg.Serial.STM32.Port))
+				if err := s.stm32Controller.Connect(); err != nil {
+					s.logger.Error("STM32连接失败", 
+						zap.String("port", s.cfg.Serial.STM32.Port),
+						zap.Error(err))
+					connectError = err
+				} else {
+					s.logger.Info("✅ STM32连接成功",
+						zap.String("port", s.cfg.Serial.STM32.Port),
+						zap.Int("baudrate", s.cfg.Serial.STM32.BaudRate))
+				}
+			} else if s.stm32Controller == nil {
+				s.logger.Debug("STM32控制器不存在，跳过连接")
+			} else {
+				s.logger.Debug("STM32已连接，跳过")
+			}
+			
+			// 连接ACM
+			if s.acmController != nil && !s.acmController.IsConnected() {
+				s.logger.Info("尝试连接ACM...", 
+					zap.String("configured_port", s.cfg.Serial.ACM.Port),
+					zap.Bool("auto_detect", s.cfg.Serial.ACM.AutoDetect))
+				if err := s.acmController.Connect(); err != nil {
+					s.logger.Error("ACM连接失败",
+						zap.String("port", s.cfg.Serial.ACM.Port),
+						zap.String("error_detail", fmt.Sprintf("%+v", err)),
+						zap.Error(err))
+					connectError = err
+				} else {
+					s.logger.Info("✅ ACM连接成功",
+						zap.String("port", s.cfg.Serial.ACM.Port),
+						zap.Int("baudrate", s.cfg.Serial.ACM.BaudRate),
+						zap.Bool("algo_timer", s.cfg.Serial.ACM.AlgoTimerEnabled))
+				}
+			} else if s.acmController == nil {
+				s.logger.Warn("❌ ACM控制器为nil，无法连接！检查初始化是否成功")
+			} else {
+				s.logger.Debug("ACM已连接，跳过")
+			}
+			
+			// 检查连接结果
+			if connectError != nil {
 				retryCount++
-				s.logger.Error("硬件连接失败，稍后重试",
-					zap.Strings("ports", ports),
-					zap.Error(err),
+				s.logger.Error("部分硬件连接失败，稍后重试",
 					zap.Int("retry_count", retryCount),
 					zap.Duration("next_retry_in", retryInterval))
 				
@@ -451,17 +548,16 @@ func (s *Server) serialConnectWithRetry() {
 					}
 				}
 			} else {
-			// 连接成功
-			s.logger.Info("🎉 硬件连接成功！",
-			  zap.Strings("ports", ports),
-			 zap.Bool("connected", s.serialController.IsConnected()),
-			 zap.Int("total_retries", retryCount))
+				// 所有需要的设备都连接成功
+				s.logger.Info("🎉 硬件连接成功！",
+					zap.Strings("ports", ports),
+					zap.Bool("stm32_connected", s.stm32Controller != nil && s.stm32Controller.IsConnected()),
+					zap.Bool("acm_connected", s.acmController != nil && s.acmController.IsConnected()),
+					zap.Int("total_retries", retryCount))
 				
 				// 重置重试参数
 				retryCount = 0
 				retryInterval = 5 * time.Second
-				
-				// TODO: 后续集成游戏服务时发布连接成功事件
 			}
 		}
 	}
@@ -469,41 +565,48 @@ func (s *Server) serialConnectWithRetry() {
 
 // setupSerialCallbacks 设置串口事件回调
 func (s *Server) setupSerialCallbacks() {
-	if s.serialController == nil {
-		return
+	// 设置STM32回调
+	if s.stm32Controller != nil {
+		// 投币检测回调
+		s.stm32Controller.SetCoinInsertedCallback(func(count byte) {
+			s.logger.Info("💰 投币检测", zap.Uint8("count", count))
+			// TODO: 后续集成游戏服务时处理投币事件
+		})
+		
+		// 回币检测回调
+		s.stm32Controller.SetCoinReturnedCallback(func(data *hardware.CoinReturnData) {
+			s.logger.Info("🪙 回币检测", 
+				zap.Uint8("front", data.FrontCount),
+				zap.Uint8("left", data.LeftCount),
+				zap.Uint8("right", data.RightCount))
+			// TODO: 后续集成游戏服务时处理回币事件
+		})
+		
+		// 按键事件回调
+		s.stm32Controller.SetButtonPressedCallback(func(event *hardware.ButtonEvent) {
+			s.logger.Info("🔘 按键事件",
+				zap.Uint8("type", event.KeyType),
+				zap.Uint8("code", event.KeyCode),
+				zap.Uint8("action", event.Action))
+			// TODO: 后续集成游戏服务时处理按键事件
+		})
+		
+		// 故障报告回调
+		s.stm32Controller.SetFaultReportCallback(func(event *hardware.FaultEvent) {
+			s.logger.Error("⚠️ 硬件故障",
+				zap.Uint8("code", event.FaultCode),
+				zap.Uint8("level", event.Level))
+			// TODO: 后续集成游戏服务时处理故障事件
+		})
 	}
 	
-	// 投币检测回调
-	s.serialController.SetCoinInsertedCallback(func(count byte) {
-		s.logger.Info("💰 投币检测", zap.Uint8("count", count))
-		// TODO: 后续集成游戏服务时处理投币事件
-	})
-	
-	// 回币检测回调
-	s.serialController.SetCoinReturnedCallback(func(data *hardware.CoinReturnData) {
-		s.logger.Info("🪙 回币检测", 
-			zap.Uint8("front", data.FrontCount),
-			zap.Uint8("left", data.LeftCount),
-			zap.Uint8("right", data.RightCount))
-		// TODO: 后续集成游戏服务时处理回币事件
-	})
-	
-	// 按键事件回调
-	s.serialController.SetButtonPressedCallback(func(event *hardware.ButtonEvent) {
-		s.logger.Info("🔘 按键事件",
-			zap.Uint8("type", event.KeyType),
-			zap.Uint8("code", event.KeyCode),
-			zap.Uint8("action", event.Action))
-		// TODO: 后续集成游戏服务时处理按键事件
-	})
-	
-	// 故障报告回调
-	s.serialController.SetFaultReportCallback(func(event *hardware.FaultEvent) {
-		s.logger.Error("⚠️ 硬件故障",
-			zap.Uint8("code", event.FaultCode),
-			zap.Uint8("level", event.Level))
-		// TODO: 后续集成游戏服务时处理故障事件
-	})
+	// 设置ACM回调（如果需要）
+	if s.acmController != nil {
+		// ACM消息处理回调
+		s.acmController.SetMessageHandler(func(msg map[string]interface{}) {
+			s.logger.Info("📨 ACM消息", zap.Any("message", msg))
+		})
+	}
 }
 
 // startServices 启动服务

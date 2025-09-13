@@ -99,6 +99,12 @@ serial:
     read_timeout: 100ms
     write_timeout: 100ms
     auto_detect: true     # 自动检测ACM设备
+    
+    # Algo命令定时器配置
+    algo_timer_enabled: false   # 是否启用定时发送algo命令（默认关闭）
+    algo_timer_interval: 5s     # 发送间隔时间
+    algo_bet: 1                 # algo命令的bet参数
+    algo_prize: 100             # algo命令的prize参数
   
   # 桥接模式配置
   bridge:

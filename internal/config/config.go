@@ -103,6 +103,12 @@ type ACMConfig struct {
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	AutoDetect   bool          `mapstructure:"auto_detect"`
+	
+	// Algo定时器配置
+	AlgoTimerEnabled  bool          `mapstructure:"algo_timer_enabled"`
+	AlgoTimerInterval time.Duration `mapstructure:"algo_timer_interval"`
+	AlgoBet          int           `mapstructure:"algo_bet"`
+	AlgoPrize        int           `mapstructure:"algo_prize"`
 }
 
 // BridgeConfig 桥接模式配置

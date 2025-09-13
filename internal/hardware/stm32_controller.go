@@ -3,6 +3,7 @@ package hardware
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -327,6 +328,14 @@ func (c *STM32Controller) writeFrame(frame *Frame) error {
 	}
 	
 	data := frame.ToBytes()
+	
+	// 打印发送数据（十六进制）
+	c.logger.Info("STM32发送数据",
+		zap.String("hex", fmt.Sprintf("% X", data)),
+		zap.Int("bytes", len(data)),
+		zap.Uint8("cmd", frame.Command),
+		zap.Uint16("seq", frame.Sequence))
+	
 	n, err := c.port.Write(data)
 	if err != nil {
 		return err
@@ -336,10 +345,7 @@ func (c *STM32Controller) writeFrame(frame *Frame) error {
 		return fmt.Errorf("incomplete write: %d/%d", n, len(data))
 	}
 	
-	c.logger.Debug("Frame sent",
-		zap.Uint8("cmd", frame.Command),
-		zap.Uint16("seq", frame.Sequence),
-		zap.Int("len", len(data)))
+	c.logger.Debug("STM32发送成功", zap.Int("bytes_written", n))
 	
 	return nil
 }
@@ -359,13 +365,18 @@ func (c *STM32Controller) readLoop() {
 		// 读取数据
 		n, err := c.port.Read(buf)
 		if err != nil {
-			if err.Error() != "EOF" {
+			if err.Error() != "EOF" && !strings.Contains(err.Error(), "timeout") {
 				c.logger.Error("Read error", zap.Error(err))
 			}
 			continue
 		}
 		
 		if n > 0 {
+			// 打印接收到的原始数据（十六进制）
+			c.logger.Debug("STM32接收原始数据",
+				zap.String("hex", fmt.Sprintf("% X", buf[:n])),
+				zap.Int("bytes", n))
+			
 			frameBuf = append(frameBuf, buf[:n]...)
 			
 			// 尝试解析帧
@@ -409,6 +420,13 @@ func (c *STM32Controller) readLoop() {
 					frameBuf = frameBuf[1:]
 					continue
 				}
+				
+				// 打印接收到的完整帧
+				c.logger.Info("STM32接收完整帧",
+					zap.String("hex", fmt.Sprintf("% X", frameBuf[:frameLen])),
+					zap.Uint8("cmd", frame.Command),
+					zap.Uint16("seq", frame.Sequence),
+					zap.Int("dataLen", len(frame.Data)))
 				
 				// 处理帧
 				c.handleFrame(frame)
