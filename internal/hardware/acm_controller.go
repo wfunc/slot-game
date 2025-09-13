@@ -118,14 +118,14 @@ func (c *ACMController) Connect() error {
 		c.logger.Info("自动检测到ACM设备", zap.String("device", device))
 	}
 
-	// 配置串口
+	// 配置串口 (8N2配置，与测试工具一致)
 	cfg := &serial.Config{
 		Name:        c.config.Port,
 		Baud:        c.config.BaudRate,
 		Size:        8,
 		StopBits:    serial.Stop2,
 		Parity:      serial.ParityNone,
-		ReadTimeout: c.config.ReadTimeout,
+		ReadTimeout: 100 * time.Millisecond, // 固定100ms超时
 	}
 
 	// 打开串口
@@ -149,13 +149,19 @@ func (c *ACMController) Connect() error {
 
 	c.logger.Info("ACM控制器已连接",
 		zap.String("port", c.config.Port),
-		zap.Int("baudrate", c.config.BaudRate))
+		zap.Int("baudrate", c.config.BaudRate),
+		zap.String("config", "8N2"))
 
-	// 等待设备就绪并发送help命令
-	time.Sleep(200 * time.Millisecond)
-	c.logger.Info("发送help命令查询支持的命令列表")
-	if err := c.SendCommand("help"); err != nil {
-		c.logger.Warn("发送help命令失败", zap.Error(err))
+	// 等待设备完全就绪（重要！）
+	time.Sleep(500 * time.Millisecond)
+	
+	// 清空可能的缓冲区数据
+	c.port.Flush()
+	
+	// 发送测试命令
+	c.logger.Info("发送测试命令")
+	if err := c.SendCommand("ver"); err != nil {
+		c.logger.Warn("发送测试命令失败", zap.Error(err))
 	}
 
 	// 启动Algo定时器（如果启用）
@@ -298,8 +304,7 @@ func (c *ACMController) readLoop() {
 				return
 			}
 
-			// 设置短超时避免阻塞
-			c.port.Flush()
+			// 读取数据
 			n, err := c.port.Read(buffer)
 			if err != nil {
 				// EOF表示连接断开
@@ -340,10 +345,18 @@ func (c *ACMController) readLoop() {
 					msgBuffer = msgBuffer[idx+1:]
 
 					if msg != "" {
+						// 跳过 "end" 和 ">" 标记
+						if msg == "end" || msg == ">" {
+							c.logger.Debug("收到结束标记", zap.String("marker", msg))
+							continue
+						}
+						
 						// 记录所有消息，帮助了解ACM设备的响应格式
 						if strings.Contains(msg, "help") || strings.Contains(msg, "Help") ||
 						   strings.Contains(msg, "command") || strings.Contains(msg, "Command") {
 							c.logger.Info("ACM帮助信息", zap.String("message", msg))
+						} else if strings.HasPrefix(msg, "{") && strings.HasSuffix(msg, "}") {
+							c.logger.Info("ACM JSON响应", zap.String("message", msg))
 						} else {
 							c.logger.Debug("ACM接收消息", zap.String("message", msg))
 						}
@@ -932,17 +945,22 @@ func (c *ACMController) sendAlgoCommandAsync() {
 		// 发送命令并获取响应
 		response, err := c.SendAlgoCommand(c.config.AlgoBet, c.config.AlgoPrize)
 		if err != nil {
-			c.logger.Error("定时algo命令执行失败",
+			c.logger.Warn("定时algo命令执行失败",
 				zap.Error(err),
 				zap.String("command", cmd))
 			return
 		}
 
-		// 记录响应
-		c.logger.Info("定时algo命令响应",
-			zap.Any("response", response),
-			zap.Float64("win", response["win"].(float64)),
-			zap.Int("hp30", response["hp30"].(int)))
+		// 记录响应（检查字段是否存在）
+		if response != nil {
+			c.logger.Info("定时algo命令响应",
+				zap.Any("response", response))
+			
+			// 安全地获取字段值
+			if win, ok := response["win"].(float64); ok {
+				c.logger.Debug("algo结果", zap.Float64("win", win))
+			}
+		}
 	}()
 }
 
