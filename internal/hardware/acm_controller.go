@@ -139,6 +139,9 @@ func (c *ACMController) Connect() error {
 
 	c.port = port
 	c.connected = true
+	c.stopCh = make(chan struct{})
+	c.cmdCh = make(chan string, 10)
+	c.respCh = make(chan interface{}, 10)
 
 	// 启动后台任务
 	go c.readLoop()
@@ -151,7 +154,7 @@ func (c *ACMController) Connect() error {
 	// 等待设备就绪并发送help命令
 	time.Sleep(200 * time.Millisecond)
 	c.logger.Info("发送help命令查询支持的命令列表")
-	if _, err := c.SendCommand("help"); err != nil {
+	if err := c.SendCommand("help"); err != nil {
 		c.logger.Warn("发送help命令失败", zap.Error(err))
 	}
 
@@ -178,23 +181,38 @@ func (c *ACMController) Disconnect() error {
 		return nil
 	}
 
+	c.logger.Info("正在断开ACM连接...")
+
 	// 停止Algo定时器
 	c.stopAlgoTimer()
 
-	// 停止后台任务
-	close(c.stopCh)
+	// 标记为未连接
+	c.connected = false
+
+	// 关闭停止通道，通知所有goroutine退出
+	if c.stopCh != nil {
+		close(c.stopCh)
+		c.stopCh = nil
+	}
+
+	// 关闭命令通道
+	if c.cmdCh != nil {
+		close(c.cmdCh)
+		c.cmdCh = nil
+	}
+
+	// 短暂等待goroutine退出
+	time.Sleep(100 * time.Millisecond)
 
 	// 关闭串口
 	if c.port != nil {
 		err := c.port.Close()
 		if err != nil {
-			c.logger.Error("关闭ACM串口失败", zap.Error(err))
-			return err
+			c.logger.Warn("关闭ACM串口时出错", zap.Error(err))
 		}
 		c.port = nil
 	}
 
-	c.connected = false
 	c.logger.Info("ACM控制器已断开")
 
 	return nil
@@ -261,19 +279,43 @@ func (c *ACMController) findACMDevice() string {
 
 // readLoop 读取循环
 func (c *ACMController) readLoop() {
+	defer func() {
+		c.logger.Info("ACM读取循环已退出")
+	}()
+
 	buffer := make([]byte, 1024)
 	var msgBuffer string
 
 	for {
 		select {
 		case <-c.stopCh:
+			c.logger.Info("收到停止信号，退出读取循环")
 			return
 		default:
+			// 检查串口是否有效
+			if c.port == nil {
+				c.logger.Warn("串口已关闭，退出读取循环")
+				return
+			}
+
+			// 设置短超时避免阻塞
+			c.port.Flush()
 			n, err := c.port.Read(buffer)
 			if err != nil {
-				if !strings.Contains(err.Error(), "timeout") {
-					c.logger.Error("读取ACM数据失败", zap.Error(err))
+				// EOF表示连接断开
+				if err.Error() == "EOF" || strings.Contains(err.Error(), "EOF") {
+					c.logger.Error("ACM连接断开(EOF)，退出读取循环")
+					c.mu.Lock()
+					c.connected = false
+					c.mu.Unlock()
+					return
 				}
+				// 忽略超时错误
+				if !strings.Contains(err.Error(), "timeout") {
+					c.logger.Debug("读取ACM数据错误", zap.Error(err))
+				}
+				// 短暂休眠避免CPU占用过高
+				time.Sleep(10 * time.Millisecond)
 				continue
 			}
 
@@ -493,13 +535,26 @@ func (c *ACMController) sendResponse(data interface{}) error {
 
 // processLoop 处理循环
 func (c *ACMController) processLoop() {
+	defer func() {
+		c.logger.Info("ACM处理循环已退出")
+	}()
+
 	for {
 		select {
 		case <-c.stopCh:
+			c.logger.Info("收到停止信号，退出处理循环")
 			return
-		case cmd := <-c.cmdCh:
+		case cmd, ok := <-c.cmdCh:
+			if !ok {
+				c.logger.Info("命令通道已关闭，退出处理循环")
+				return
+			}
 			c.handleCommand(cmd)
-		case resp := <-c.respCh:
+		case resp, ok := <-c.respCh:
+			if !ok {
+				c.logger.Info("响应通道已关闭，退出处理循环")
+				return
+			}
 			c.sendResponse(resp)
 		}
 	}
