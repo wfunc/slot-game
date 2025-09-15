@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket 测试工具</title>
+    <title>WebSocket 测试工具 - Protobuf调试版</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -69,7 +69,7 @@
             color: #555;
             font-size: 14px;
         }
-        input, textarea {
+        input, textarea, select {
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 5px;
@@ -129,7 +129,7 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             padding: 15px;
-            height: 300px;
+            height: 400px;
             overflow-y: auto;
         }
         .message-box h3 {
@@ -139,8 +139,8 @@
             padding-bottom: 10px;
         }
         .message {
-            padding: 8px;
-            margin: 5px 0;
+            padding: 10px;
+            margin: 8px 0;
             border-radius: 5px;
             font-size: 13px;
             word-break: break-all;
@@ -164,6 +164,29 @@
         }
         .message .content {
             color: #333;
+        }
+        .message .proto-fields {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.8);
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .proto-field {
+            margin: 4px 0;
+            padding: 2px 0;
+        }
+        .proto-field .field-name {
+            color: #2196f3;
+            font-weight: bold;
+        }
+        .proto-field .field-value {
+            color: #4caf50;
+        }
+        .proto-field .field-type {
+            color: #999;
+            font-size: 11px;
         }
         .quick-actions {
             margin-top: 20px;
@@ -215,11 +238,41 @@
             font-size: 12px;
             color: #999;
         }
+        .hex-dump {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+            padding: 5px;
+            background: #f5f5f5;
+            border-radius: 3px;
+            word-break: break-all;
+        }
+        .nested-object {
+            margin-left: 20px;
+            padding-left: 10px;
+            border-left: 2px solid #e0e0e0;
+        }
+        .array-item {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(0,0,0,0.02);
+            border-radius: 3px;
+        }
+        .debug-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fffbf0;
+            border: 1px solid #ffa500;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎮 老虎机游戏 WebSocket 测试工具</h1>
+        <h1>🎮 老虎机游戏 WebSocket 测试工具 - Protobuf调试版</h1>
         
         <div class="status-bar">
             <div class="status">
@@ -232,11 +285,15 @@
         <div class="control-panel">
             <div class="input-group">
                 <label>WebSocket URL</label>
-                <input type="text" id="wsUrl" value="ws://localhost:8080/ws/game" placeholder="ws://localhost:8080/ws/game">
+                <input type="text" id="wsUrl" value="ws://localhost:8080/ws/slot" placeholder="ws://localhost:8080/ws/slot">
             </div>
             <div class="input-group">
-                <label>JWT Token (可选)</label>
-                <input type="text" id="jwtToken" placeholder="留空使用访客模式">
+                <label>调试模式</label>
+                <select id="debugMode">
+                    <option value="readable">人类可读（推荐）</option>
+                    <option value="hex">十六进制</option>
+                    <option value="both">两者都显示</option>
+                </select>
             </div>
         </div>
 
@@ -249,21 +306,11 @@
         <div class="quick-actions">
             <h3>快速测试命令</h3>
             <div class="action-buttons">
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'ping'}))">Ping</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'subscribe', data: {channel: 'game'}}))">订阅游戏频道</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'get_balance'}))">获取余额</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_state'}))">游戏状态</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'heartbeat'}))">心跳</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_start', data: {bet_amount: 100}}))">开始游戏</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_spin'}))">旋转</div>
-                <div class="action-btn" onclick="sendMessage(JSON.stringify({type: 'game_settle'}))">结算游戏</div>
+                <div class="action-btn" onclick="sendEnterRoom()">进入房间 (1901)</div>
+                <div class="action-btn" onclick="sendStartGame(100)">开始游戏 (1902) - 100币</div>
+                <div class="action-btn" onclick="sendStartGame(200)">开始游戏 (1902) - 200币</div>
+                <div class="action-btn" onclick="sendStartGame(500)">开始游戏 (1902) - 500币</div>
             </div>
-        </div>
-
-        <div class="input-group">
-            <label>发送消息</label>
-            <textarea id="messageInput" rows="3" placeholder='输入要发送的消息，例如: {"type": "ping"}'></textarea>
-            <button class="btn-success" onclick="sendCustomMessage()" style="margin-top: 10px">发送自定义消息</button>
         </div>
 
         <div class="stats">
@@ -299,6 +346,55 @@
         let sentCount = 0;
         let receivedCount = 0;
         let errorCount = 0;
+        let debugMode = 'readable';
+
+        // Protobuf wire types
+        const WIRE_TYPES = {
+            VARINT: 0,
+            FIXED64: 1,
+            LENGTH_DELIMITED: 2,
+            FIXED32: 5
+        };
+
+        // 字段名称映射
+        const FIELD_NAMES = {
+            1901: { // m_1901_toc
+                1: 'bet_val (下注档位)',
+                2: 'odds (赔率信息)'
+            },
+            1902: { // m_1902_toc
+                1: 'bet_val (下注金额)',
+                2: 'win (本次赢取)',
+                3: 'total_win (总赢取)',
+                4: 'is_free (是否免费游戏)',
+                5: 'current_free (当前免费游戏)',
+                6: 'total_free (总免费游戏)',
+                7: 'result (游戏结果)'
+            },
+            1903: { // p_1903_toc
+                1: 'coins (当前金币)',
+                2: 'remain (余分)',
+                3: 'down_coins (落币)',
+                4: 'jp1 (JP1奖池)',
+                5: 'jp2 (JP2奖池)',
+                6: 'jp3 (JP3奖池)',
+                7: 'jp_all (总奖池)'
+            }
+        };
+
+        // 符号映射
+        const SYMBOL_NAMES = {
+            0: '发财',
+            1: '红中',
+            2: '白板',
+            3: '八万',
+            4: '六筒',
+            5: '六条',
+            6: '三筒',
+            7: '二条',
+            '-1': 'Wild',
+            '999': 'Wild'
+        };
 
         function updateStats() {
             document.getElementById('sentCount').textContent = sentCount;
@@ -320,50 +416,372 @@
 
         setInterval(updateConnectionTime, 1000);
 
+        // Protobuf解析器
+        class ProtobufParser {
+            constructor(bytes) {
+                this.bytes = bytes;
+                this.offset = 0;
+            }
+
+            readVarint() {
+                let value = 0;
+                let shift = 0;
+                while (this.offset < this.bytes.length) {
+                    const byte = this.bytes[this.offset++];
+                    value |= (byte & 0x7F) << shift;
+                    if ((byte & 0x80) === 0) {
+                        return value;
+                    }
+                    shift += 7;
+                }
+                throw new Error('Varint too long');
+            }
+
+            readFixed32() {
+                if (this.offset + 4 > this.bytes.length) {
+                    throw new Error('Not enough bytes for fixed32');
+                }
+                const view = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 4);
+                this.offset += 4;
+                return view.getUint32(0, true); // little-endian
+            }
+
+            readFixed64() {
+                if (this.offset + 8 > this.bytes.length) {
+                    throw new Error('Not enough bytes for fixed64');
+                }
+                const view = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 8);
+                this.offset += 8;
+                // 返回低32位，对于我们的用例足够了
+                return view.getUint32(0, true);
+            }
+
+            readBytes(length) {
+                if (this.offset + length > this.bytes.length) {
+                    throw new Error('Not enough bytes');
+                }
+                const result = this.bytes.slice(this.offset, this.offset + length);
+                this.offset += length;
+                return result;
+            }
+
+            parseMessage() {
+                const fields = {};
+                
+                while (this.offset < this.bytes.length) {
+                    const tag = this.readVarint();
+                    const fieldNumber = tag >>> 3;
+                    const wireType = tag & 0x07;
+                    
+                    let value;
+                    switch (wireType) {
+                        case WIRE_TYPES.VARINT:
+                            value = this.readVarint();
+                            break;
+                        case WIRE_TYPES.FIXED64:
+                            value = this.readFixed64();
+                            break;
+                        case WIRE_TYPES.LENGTH_DELIMITED:
+                            const length = this.readVarint();
+                            const bytes = this.readBytes(length);
+                            // 尝试递归解析嵌套消息
+                            try {
+                                const parser = new ProtobufParser(bytes);
+                                value = parser.parseMessage();
+                            } catch (e) {
+                                // 如果不是消息，可能是字符串或原始字节
+                                value = bytes;
+                            }
+                            break;
+                        case WIRE_TYPES.FIXED32:
+                            value = this.readFixed32();
+                            break;
+                        default:
+                            throw new Error(`Unknown wire type: ${wireType}`);
+                    }
+                    
+                    // 支持重复字段
+                    if (fields[fieldNumber]) {
+                        if (Array.isArray(fields[fieldNumber])) {
+                            fields[fieldNumber].push(value);
+                        } else {
+                            fields[fieldNumber] = [fields[fieldNumber], value];
+                        }
+                    } else {
+                        fields[fieldNumber] = value;
+                    }
+                }
+                
+                return fields;
+            }
+        }
+
+        // 格式化Protobuf字段为人类可读
+        function formatProtobufFields(msgId, fields, indent = '') {
+            const fieldNames = FIELD_NAMES[msgId] || {};
+            let html = '';
+            
+            for (const [fieldNum, value] of Object.entries(fields)) {
+                const fieldName = fieldNames[fieldNum] || `field_${fieldNum}`;
+                
+                if (value instanceof Uint8Array) {
+                    // 字节数组，可能是嵌套消息
+                    try {
+                        const parser = new ProtobufParser(value);
+                        const nestedFields = parser.parseMessage();
+                        html += `<div class="proto-field">
+                            ${indent}<span class="field-name">${fieldName}</span>: 
+                            <span class="field-type">[嵌套消息]</span>
+                            <div class="nested-object">
+                                ${formatNestedObject(nestedFields, indent + '  ')}
+                            </div>
+                        </div>`;
+                    } catch (e) {
+                        // 不是消息，显示为十六进制
+                        const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        html += `<div class="proto-field">
+                            ${indent}<span class="field-name">${fieldName}</span>: 
+                            <span class="field-value">${hex}</span>
+                            <span class="field-type">[bytes]</span>
+                        </div>`;
+                    }
+                } else if (typeof value === 'object' && !Array.isArray(value)) {
+                    // 嵌套对象
+                    html += `<div class="proto-field">
+                        ${indent}<span class="field-name">${fieldName}</span>: 
+                        <div class="nested-object">
+                            ${formatNestedObject(value, indent + '  ')}
+                        </div>
+                    </div>`;
+                } else if (Array.isArray(value)) {
+                    // 数组字段
+                    html += `<div class="proto-field">
+                        ${indent}<span class="field-name">${fieldName}</span>: 
+                        <span class="field-type">[数组]</span>`;
+                    value.forEach((item, idx) => {
+                        html += `<div class="array-item">
+                            ${indent}  [${idx}]: <span class="field-value">${formatValue(item)}</span>
+                        </div>`;
+                    });
+                    html += '</div>';
+                } else {
+                    // 简单值
+                    html += `<div class="proto-field">
+                        ${indent}<span class="field-name">${fieldName}</span>: 
+                        <span class="field-value">${formatValue(value)}</span>
+                    </div>`;
+                }
+            }
+            
+            return html;
+        }
+
+        // 格式化嵌套对象
+        function formatNestedObject(obj, indent = '') {
+            let html = '';
+            for (const [key, value] of Object.entries(obj)) {
+                if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Uint8Array)) {
+                    html += `<div class="proto-field">
+                        ${indent}field_${key}: 
+                        <div class="nested-object">
+                            ${formatNestedObject(value, indent + '  ')}
+                        </div>
+                    </div>`;
+                } else if (Array.isArray(value)) {
+                    html += `<div class="proto-field">
+                        ${indent}field_${key}: [数组]`;
+                    value.forEach((item, idx) => {
+                        const displayValue = formatValue(item);
+                        html += `<div class="array-item">
+                            ${indent}  [${idx}]: ${displayValue}
+                        </div>`;
+                    });
+                    html += '</div>';
+                } else {
+                    html += `<div class="proto-field">
+                        ${indent}field_${key}: <span class="field-value">${formatValue(value)}</span>
+                    </div>`;
+                }
+            }
+            return html;
+        }
+
+        // 格式化值
+        function formatValue(value) {
+            if (value instanceof Uint8Array) {
+                return '[' + Array.from(value).join(', ') + ']';
+            } else if (typeof value === 'number') {
+                // 检查是否是符号ID
+                const symbolName = SYMBOL_NAMES[value];
+                if (symbolName) {
+                    return `${value} (${symbolName})`;
+                }
+                return value.toString();
+            } else if (typeof value === 'boolean') {
+                return value ? 'true' : 'false';
+            } else {
+                return JSON.stringify(value);
+            }
+        }
+
+        // 解码完整的Protobuf消息
+        function decodeProtobufMessage(bytes) {
+            if (bytes.length < 6) {
+                return { 
+                    msgId: 0, 
+                    length: 0, 
+                    html: '<span style="color: red;">消息太短，无法解析</span>',
+                    hex: ''
+                };
+            }
+            
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            
+            // 读取长度（4字节）
+            const length = view.getUint32(0, false);
+            
+            // 读取消息ID（2字节）
+            const msgId = view.getUint16(4, false);
+            
+            // 获取数据部分
+            const dataBytes = bytes.slice(6);
+            
+            // 生成十六进制显示
+            const hex = Array.from(dataBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            
+            // 解析Protobuf数据
+            let html = `<div><strong>消息ID:</strong> ${msgId}</div>`;
+            html += `<div><strong>数据长度:</strong> ${length} bytes</div>`;
+            
+            if (dataBytes.length > 0) {
+                try {
+                    const parser = new ProtobufParser(dataBytes);
+                    const fields = parser.parseMessage();
+                    
+                    html += '<div class="proto-fields">';
+                    html += '<div><strong>解析的字段:</strong></div>';
+                    html += formatProtobufFields(msgId, fields);
+                    html += '</div>';
+                    
+                    // 特殊处理某些消息类型
+                    if (msgId === 1902 && fields[7]) {
+                        // 游戏结果消息，解析result字段
+                        html += '<div class="debug-info">';
+                        html += '<strong>游戏结果详情:</strong><br>';
+                        html += parseGameResult(fields[7]);
+                        html += '</div>';
+                    }
+                } catch (e) {
+                    html += `<div style="color: orange;">解析错误: ${e.message}</div>`;
+                }
+            } else {
+                html += '<div>无数据内容</div>';
+            }
+            
+            return {
+                msgId: msgId,
+                length: length,
+                html: html,
+                hex: hex
+            };
+        }
+
+        // 解析游戏结果
+        function parseGameResult(resultData) {
+            let html = '';
+            
+            try {
+                if (resultData instanceof Uint8Array) {
+                    const parser = new ProtobufParser(resultData);
+                    const result = parser.parseMessage();
+                    
+                    // 解析5行数据
+                    for (let i = 1; i <= 5; i++) {
+                        if (result[i]) {
+                            html += `<div>第${i}行: `;
+                            if (Array.isArray(result[i])) {
+                                html += result[i].map(v => {
+                                    const symbolName = SYMBOL_NAMES[v] || `符号${v}`;
+                                    return symbolName;
+                                }).join(', ');
+                            }
+                            html += '</div>';
+                        }
+                    }
+                    
+                    // 解析奖励信息
+                    if (result[6]) {
+                        html += '<div>奖励信息: [包含奖励数据]</div>';
+                    }
+                } else if (typeof resultData === 'object') {
+                    html += '<pre>' + JSON.stringify(resultData, null, 2) + '</pre>';
+                }
+            } catch (e) {
+                html += `解析失败: ${e.message}`;
+            }
+            
+            return html;
+        }
+
         function connect() {
             const url = document.getElementById('wsUrl').value;
-            const token = document.getElementById('jwtToken').value;
+            debugMode = document.getElementById('debugMode').value;
             
             if (!url) {
                 alert('请输入 WebSocket URL');
                 return;
             }
 
-            // 如果有 token，添加到 URL 参数中
-            let finalUrl = url;
-            if (token) {
-                finalUrl += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
-            }
-
             try {
-                ws = new WebSocket(finalUrl);
+                ws = new WebSocket(url);
+                ws.binaryType = 'arraybuffer'; // 重要：设置二进制类型
                 
                 ws.onopen = function(event) {
                     console.log('WebSocket 连接已建立', event);
                     connectionStartTime = Date.now();
                     updateStatus(true);
-                    addReceivedMessage('连接成功', 'success');
+                    addReceivedMessage('✅ 连接成功', 'success');
                 };
                 
                 ws.onmessage = function(event) {
-                    console.log('收到消息:', event.data);
                     receivedCount++;
                     updateStats();
-                    addReceivedMessage(event.data);
+                    
+                    if (event.data instanceof ArrayBuffer) {
+                        const bytes = new Uint8Array(event.data);
+                        const decoded = decodeProtobufMessage(bytes);
+                        console.log('收到Protobuf消息:', decoded);
+                        
+                        let displayHtml = `<strong>[Protobuf 消息 ${decoded.msgId}]</strong><br>`;
+                        
+                        if (debugMode === 'readable' || debugMode === 'both') {
+                            displayHtml += decoded.html;
+                        }
+                        
+                        if (debugMode === 'hex' || debugMode === 'both') {
+                            displayHtml += `<div class="hex-dump">HEX: ${decoded.hex}</div>`;
+                        }
+                        
+                        addReceivedMessage(displayHtml, 'received', true);
+                    } else {
+                        // 处理文本消息
+                        console.log('收到文本消息:', event.data);
+                        addReceivedMessage(event.data);
+                    }
                 };
                 
                 ws.onerror = function(event) {
                     console.error('WebSocket 错误:', event);
                     errorCount++;
                     updateStats();
-                    addReceivedMessage('连接错误', 'error');
+                    addReceivedMessage('❌ 连接错误', 'error');
                 };
                 
                 ws.onclose = function(event) {
                     console.log('WebSocket 连接已关闭', event);
                     connectionStartTime = null;
                     updateStatus(false);
-                    addReceivedMessage(`连接关闭 (code: ${event.code}, reason: ${event.reason || '无'})`, 'error');
+                    addReceivedMessage(`⚠️ 连接关闭 (code: ${event.code}, reason: ${event.reason || '无'})`, 'error');
                 };
                 
             } catch (error) {
@@ -379,31 +797,77 @@
             }
         }
 
-        function sendMessage(message) {
+        // 编码Protobuf消息
+        function encodeProtobufMessage(msgId, data = {}) {
+            let protoData = new Uint8Array(0);
+            
+            if (msgId === 1901) {
+                // m_1901_tos: 进入房间，type = 1 (麻将)
+                protoData = new Uint8Array([0x08, 0x01]); // field 1, varint 1
+            } else if (msgId === 1902) {
+                // m_1902_tos: 开始游戏，bet_val = data.betAmount
+                const betAmount = data.betAmount || 100;
+                const betBytes = encodeVarint(betAmount);
+                protoData = new Uint8Array([0x08, ...betBytes]);
+            }
+            
+            // 计算总长度（2字节消息ID + protobuf数据）
+            const totalLength = 2 + protoData.length;
+            
+            // 创建完整的消息缓冲区
+            const buffer = new ArrayBuffer(4 + totalLength);
+            const view = new DataView(buffer);
+            const bytes = new Uint8Array(buffer);
+            
+            // 写入长度（4字节，大端序）
+            view.setUint32(0, totalLength, false);
+            
+            // 写入消息ID（2字节，大端序）
+            view.setUint16(4, msgId, false);
+            
+            // 写入protobuf数据
+            bytes.set(protoData, 6);
+            
+            return buffer;
+        }
+        
+        // Varint编码
+        function encodeVarint(value) {
+            const bytes = [];
+            while (value > 0x7f) {
+                bytes.push((value & 0x7f) | 0x80);
+                value >>>= 7;
+            }
+            bytes.push(value & 0x7f);
+            return bytes;
+        }
+
+        function sendMessage(buffer) {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 alert('WebSocket 未连接');
                 return;
             }
             
             try {
-                ws.send(message);
+                ws.send(buffer);
                 sentCount++;
                 updateStats();
-                addSentMessage(message);
             } catch (error) {
                 console.error('发送消息失败:', error);
                 alert('发送消息失败: ' + error.message);
             }
         }
 
-        function sendCustomMessage() {
-            const message = document.getElementById('messageInput').value;
-            if (!message) {
-                alert('请输入要发送的消息');
-                return;
-            }
-            sendMessage(message);
-            document.getElementById('messageInput').value = '';
+        function sendEnterRoom() {
+            const buffer = encodeProtobufMessage(1901);
+            sendMessage(buffer);
+            addSentMessage('📤 [Protobuf] 进入房间 (1901) - type: 1');
+        }
+
+        function sendStartGame(betAmount) {
+            const buffer = encodeProtobufMessage(1902, {betAmount: betAmount});
+            sendMessage(buffer);
+            addSentMessage(`📤 [Protobuf] 开始游戏 (1902) - 下注: ${betAmount}`);
         }
 
         function updateStatus(connected) {
@@ -431,21 +895,28 @@
             container.insertBefore(messageDiv, container.firstChild);
         }
 
-        function addReceivedMessage(message, type = 'received') {
+        function addReceivedMessage(message, type = 'received', isHtml = false) {
             const container = document.getElementById('receivedMessages');
-            const messageDiv = createMessageDiv(message, type === 'error' ? 'error' : 'received');
+            const messageDiv = createMessageDiv(message, type === 'error' ? 'error' : 'received', isHtml);
             container.insertBefore(messageDiv, container.firstChild);
         }
 
-        function createMessageDiv(message, className) {
+        function createMessageDiv(message, className, isHtml = false) {
             const div = document.createElement('div');
             div.className = `message ${className}`;
             
             const timestamp = new Date().toLocaleTimeString();
-            div.innerHTML = `
-                <span class="timestamp">${timestamp}</span>
-                <span class="content">${escapeHtml(message)}</span>
-            `;
+            if (isHtml) {
+                div.innerHTML = `
+                    <span class="timestamp">${timestamp}</span>
+                    <div class="content">${message}</div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <span class="timestamp">${timestamp}</span>
+                    <span class="content">${escapeHtml(message)}</span>
+                `;
+            }
             
             return div;
         }
@@ -458,7 +929,7 @@
                 '"': '&quot;',
                 "'": '&#039;'
             };
-            return text.replace(/[&<>"']/g, m => map[m]);
+            return String(text).replace(/[&<>"']/g, m => map[m]);
         }
 
         function clearLogs() {
@@ -469,14 +940,6 @@
             errorCount = 0;
             updateStats();
         }
-
-        // 监听回车键发送消息
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendCustomMessage();
-            }
-        });
     </script>
 </body>
 </html>

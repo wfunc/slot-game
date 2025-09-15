@@ -38,7 +38,7 @@ func DefaultACMConfig() *ACMConfig {
 		AutoDetect:   true,
 		// Algo定时器默认配置
 		AlgoTimerEnabled:  false,
-		AlgoTimerInterval: 5 * time.Second,
+		AlgoTimerInterval: 1 * time.Second,
 		AlgoBet:           1,
 		AlgoPrize:         100,
 	}
@@ -46,11 +46,12 @@ func DefaultACMConfig() *ACMConfig {
 
 // ACMController ACM设备控制器
 type ACMController struct {
-	config    *ACMConfig
-	port      *serial.Port
-	mu        sync.RWMutex
-	connected bool
-	logger    *zap.Logger
+	config       *ACMConfig
+	port         *serial.Port
+	reconnectMgr *SerialReconnectManager // 重连管理器
+	mu           sync.RWMutex
+	connected    bool
+	logger       *zap.Logger
 
 	// 通道
 	stopCh chan struct{}
@@ -102,114 +103,225 @@ func (c *ACMController) SetSTM32Controller(stm32 *STM32Controller) {
 // Connect 连接ACM设备
 func (c *ACMController) Connect() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.connected {
+		c.mu.Unlock()
 		return nil
 	}
 
-	// 自动检测设备
-	if c.config.AutoDetect || c.config.Port == "auto" {
-		device := c.findACMDevice()
-		if device == "" {
-			return fmt.Errorf("未找到ACM设备")
-		}
-		c.config.Port = device
-		c.logger.Info("自动检测到ACM设备", zap.String("device", device))
-	}
+	c.logger.Info("ACM Connect() 函数开始执行",
+		zap.Bool("algo_enabled", c.config.AlgoTimerEnabled),
+		zap.Duration("algo_interval", c.config.AlgoTimerInterval))
 
-	// 配置串口 (8N2配置，与测试工具一致)
-	cfg := &serial.Config{
-		Name:        c.config.Port,
+	// 初始化实际的连接配置
+	serialCfg := &serial.Config{
 		Baud:        c.config.BaudRate,
 		Size:        8,
 		StopBits:    serial.Stop2,
 		Parity:      serial.ParityNone,
-		ReadTimeout: 100 * time.Millisecond, // 固定100ms超时
+		ReadTimeout: 100 * time.Millisecond,
 	}
 
-	// 打开串口
-	port, err := serial.OpenPort(cfg)
+	// 创建重连管理器
+	c.reconnectMgr = NewSerialReconnectManager("ACM", "ttyACM", serialCfg)
+	c.logger.Info("重连管理器已创建")
+
+	// 设置回调
+	c.reconnectMgr.SetCallbacks(
+		// 连接成功回调
+		func(port *serial.Port) error {
+			c.logger.Info("ACM连接回调开始执行")
+
+			// 缓存配置（避免后续访问时的潜在锁问题）
+			algoEnabled := c.config.AlgoTimerEnabled
+			algoInterval := c.config.AlgoTimerInterval
+
+			// 更新状态
+			c.port = port
+			c.connected = true
+
+			// 创建通道
+			c.stopCh = make(chan struct{})
+			c.cmdCh = make(chan string, 10)
+			c.respCh = make(chan interface{}, 10)
+
+			c.logger.Info("ACM通道已创建，准备启动后台任务")
+
+			// 启动后台任务
+			go c.readLoop()
+			go c.processLoop()
+
+			c.logger.Info("ACM后台任务已启动")
+
+			c.logger.Info("步骤1: 准备获取设备路径")
+			// 获取设备路径（简化处理，避免潜在的锁问题）
+			devicePath := "/dev/ttyACM"
+			c.logger.Info("步骤2: 设备路径获取完成", zap.String("path", devicePath))
+
+			c.logger.Info("ACM连接成功",
+				zap.String("device", devicePath))
+
+			c.logger.Info("步骤3: 准备等待设备就绪")
+			// 等待设备就绪
+			time.Sleep(500 * time.Millisecond)
+			c.logger.Info("步骤4: 设备就绪等待完成")
+
+			c.logger.Info("设备就绪，检查Algo定时器配置",
+				zap.Bool("enabled", algoEnabled))
+
+			c.logger.Info("步骤5: 检查是否启动Algo定时器",
+				zap.Bool("enabled", algoEnabled))
+
+			// 启动Algo定时器
+			if algoEnabled {
+				c.logger.Info("步骤6: Algo定时器已启用，准备启动...",
+					zap.Bool("enabled", algoEnabled),
+					zap.Duration("interval", algoInterval))
+				// 异步启动定时器，避免阻塞
+				go func() {
+					c.logger.Info("步骤7: Algo定时器goroutine已启动，等待500ms")
+					time.Sleep(500 * time.Millisecond)
+					c.logger.Info("步骤8: 准备调用startAlgoTimer()")
+					c.startAlgoTimer()
+					c.logger.Info("步骤9: startAlgoTimer()调用完成")
+				}()
+				c.logger.Info("步骤10: Algo定时器goroutine已创建")
+			} else {
+				c.logger.Info("Algo定时器未启用",
+					zap.Bool("enabled", algoEnabled))
+			}
+
+			c.logger.Info("步骤11: 准备返回nil")
+			c.logger.Info("ACM连接回调执行完成")
+			return nil
+		},
+		// 断开连接回调
+		func() {
+			c.connected = false
+			c.stopAlgoTimer()
+			if c.stopCh != nil {
+				close(c.stopCh)
+				c.stopCh = nil
+			}
+			c.logger.Info("ACM连接已断开")
+		},
+		// 重连成功回调
+		func(port *serial.Port) error {
+			c.logger.Info("ACM重连回调开始执行")
+
+			// 缓存配置（避免后续访问时的潜在锁问题）
+			algoEnabled := c.config.AlgoTimerEnabled
+			algoInterval := c.config.AlgoTimerInterval
+
+			// 更新状态
+			c.port = port
+			c.connected = true
+
+			// 创建通道
+			c.stopCh = make(chan struct{})
+			c.cmdCh = make(chan string, 10)
+			c.respCh = make(chan interface{}, 10)
+
+			// 重启后台任务
+			go c.readLoop()
+			go c.processLoop()
+
+			// 获取设备路径（简化处理）
+			devicePath := "/dev/ttyACM"
+
+			c.logger.Info("ACM重连成功",
+				zap.String("new_device", devicePath))
+
+			// 重启Algo定时器
+			if algoEnabled {
+				c.logger.Info("重连后重启Algo定时器...",
+					zap.Bool("enabled", algoEnabled),
+					zap.Duration("interval", algoInterval))
+				// 异步启动定时器，避免阻塞
+				go func() {
+					time.Sleep(500 * time.Millisecond)
+					c.startAlgoTimer()
+				}()
+			} else {
+				c.logger.Info("重连后Algo定时器未启用",
+					zap.Bool("enabled", algoEnabled))
+			}
+
+			c.logger.Info("ACM重连回调执行完成")
+			return nil
+		},
+	)
+
+	// 在调用Start()之前释放锁，避免死锁
+	c.mu.Unlock()
+
+	c.logger.Info("准备启动重连管理器...")
+	// 启动重连管理器（不持有锁）
+	err := c.reconnectMgr.Start()
 	if err != nil {
-		c.logger.Error("打开ACM串口失败",
-			zap.String("port", c.config.Port),
-			zap.Error(err))
-		return fmt.Errorf("打开ACM串口失败: %w", err)
+		c.logger.Error("重连管理器启动失败", zap.Error(err))
+		return err
 	}
-
-	c.port = port
-	c.connected = true
-	c.stopCh = make(chan struct{})
-	c.cmdCh = make(chan string, 10)
-	c.respCh = make(chan interface{}, 10)
-
-	// 启动后台任务
-	go c.readLoop()
-	go c.processLoop()
-
-	c.logger.Info("ACM控制器已连接",
-		zap.String("port", c.config.Port),
-		zap.Int("baudrate", c.config.BaudRate),
-		zap.String("config", "8N2"))
-
-	// 等待设备完全就绪（重要！）
-	time.Sleep(500 * time.Millisecond)
-	
-	// 清空可能的缓冲区数据
-	c.port.Flush()
-	
-	// 不发送初始命令，设备可能不识别
-	// 根据测试工具的行为，直接等待用户命令或定时器命令
-	c.logger.Info("ACM设备就绪，等待命令")
-
-	// 启动Algo定时器（如果启用）
-	if c.config.AlgoTimerEnabled {
-		// 延迟启动，确保设备完全就绪
-		time.Sleep(500 * time.Millisecond)
-		c.startAlgoTimer()
-		c.logger.Info("Algo定时器已启动",
-			zap.Duration("interval", c.config.AlgoTimerInterval),
-			zap.Int("bet", c.config.AlgoBet),
-			zap.Int("prize", c.config.AlgoPrize))
-	}
-
+	c.logger.Info("重连管理器启动成功")
 	return nil
 }
 
 // Disconnect 断开连接
 func (c *ACMController) Disconnect() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if !c.connected {
+		c.mu.Unlock()
 		return nil
 	}
 
 	c.logger.Info("正在断开ACM连接...")
 
-	// 停止Algo定时器
-	c.stopAlgoTimer()
-
 	// 标记为未连接
 	c.connected = false
 
-	// 关闭停止通道，通知所有goroutine退出
+	// 首先关闭停止通道，通知所有goroutine退出（包括Algo定时器）
 	if c.stopCh != nil {
+		c.logger.Info("关闭停止通道，通知所有goroutine退出...")
 		close(c.stopCh)
 		c.stopCh = nil
 	}
 
+	// 释放锁以避免stopAlgoTimer中的死锁
+	c.mu.Unlock()
+
+	// 停止Algo定时器（这会关闭algoTimerStopCh）
+	c.logger.Info("停止Algo定时器...")
+	c.stopAlgoTimer()
+
+	// 停止重连管理器（这可能会阻塞，所以不持有锁）
+	c.mu.Lock()
+	mgr := c.reconnectMgr
+	c.reconnectMgr = nil
+	c.mu.Unlock()
+
+	if mgr != nil {
+		c.logger.Info("停止重连管理器...")
+		mgr.Stop()
+	}
+
+	// 等待goroutine退出
+	c.logger.Info("等待goroutine退出...")
+	time.Sleep(200 * time.Millisecond)
+
+	// 清理资源
+	c.mu.Lock()
+
 	// 关闭命令通道
 	if c.cmdCh != nil {
+		c.logger.Info("关闭命令通道...")
 		close(c.cmdCh)
 		c.cmdCh = nil
 	}
 
-	// 短暂等待goroutine退出
-	time.Sleep(100 * time.Millisecond)
-
 	// 关闭串口
 	if c.port != nil {
+		c.logger.Info("关闭串口...")
 		err := c.port.Close()
 		if err != nil {
 			c.logger.Warn("关闭ACM串口时出错", zap.Error(err))
@@ -218,6 +330,7 @@ func (c *ACMController) Disconnect() error {
 	}
 
 	c.logger.Info("ACM控制器已断开")
+	c.mu.Unlock()
 
 	return nil
 }
@@ -317,9 +430,9 @@ func (c *ACMController) readLoop() {
 				}
 				// 只有在真正的错误时才考虑断开
 				// 例如：device not configured, broken pipe等
-				if strings.Contains(err.Error(), "device not configured") || 
-				   strings.Contains(err.Error(), "broken pipe") ||
-				   strings.Contains(err.Error(), "input/output error") {
+				if strings.Contains(err.Error(), "device not configured") ||
+					strings.Contains(err.Error(), "broken pipe") ||
+					strings.Contains(err.Error(), "input/output error") {
 					c.logger.Error("ACM设备断开连接", zap.Error(err))
 					c.mu.Lock()
 					c.connected = false
@@ -357,10 +470,10 @@ func (c *ACMController) readLoop() {
 							c.logger.Debug("收到结束标记", zap.String("marker", msg))
 							continue
 						}
-						
+
 						// 记录所有消息，帮助了解ACM设备的响应格式
 						if strings.Contains(msg, "help") || strings.Contains(msg, "Help") ||
-						   strings.Contains(msg, "command") || strings.Contains(msg, "Command") {
+							strings.Contains(msg, "command") || strings.Contains(msg, "Command") {
 							c.logger.Info("ACM帮助信息", zap.String("message", msg))
 						} else if strings.HasPrefix(msg, "{") && strings.HasSuffix(msg, "}") {
 							c.logger.Info("ACM JSON响应", zap.String("message", msg))
@@ -383,12 +496,17 @@ func (c *ACMController) processMessage(msg string) {
 	if strings.HasPrefix(msg, "{") {
 		var jsonMsg map[string]interface{}
 		if err := json.Unmarshal([]byte(msg), &jsonMsg); err == nil {
+			// 成功解析为JSON，作为ACM消息处理
 			c.handleJSONMessage(jsonMsg)
+			return
+		} else {
+			// JSON解析失败，可能是格式错误或不完整的JSON
+			c.logger.Debug("JSON解析失败，忽略", zap.String("message", msg), zap.Error(err))
 			return
 		}
 	}
 
-	// 处理简单命令
+	// 只有非JSON格式的消息才作为命令处理
 	c.handleCommand(msg)
 }
 
@@ -422,9 +540,16 @@ func (c *ACMController) handleCommand(cmd string) {
 	}
 
 	// 忽略ACM设备的错误响应，避免循环
-	if strings.Contains(cmd, "Command not recognised") || 
-	   strings.Contains(cmd, "Enter 'help'") {
+	if strings.Contains(cmd, "Command not recognised") ||
+		strings.Contains(cmd, "Enter 'help'") {
 		c.logger.Debug("忽略ACM错误响应", zap.String("message", cmd))
+		return
+	}
+
+	// 忽略看起来像JSON但解析失败的数据（避免将ACM的JSON响应当作命令）
+	if strings.HasPrefix(cmd, "{") || strings.Contains(cmd, "\"code\"") ||
+		strings.Contains(cmd, "\"msg\"") || strings.Contains(cmd, "\"ident\"") {
+		c.logger.Debug("忽略非命令格式的数据", zap.String("message", cmd))
 		return
 	}
 
@@ -546,6 +671,10 @@ func (c *ACMController) sendResponse(data interface{}) error {
 	n, err := c.port.Write(response)
 	if err != nil {
 		c.logger.Error("发送ACM响应失败", zap.Error(err))
+		// 触发重连
+		if c.reconnectMgr != nil {
+			c.reconnectMgr.HandleError(err)
+		}
 		return err
 	}
 
@@ -576,11 +705,15 @@ func (c *ACMController) processLoop() {
 				zap.String("command", cmd),
 				zap.String("hex", fmt.Sprintf("% X", cmdBytes)),
 				zap.Int("bytes", len(cmdBytes)))
-			
+
 			if c.port != nil {
 				n, err := c.port.Write(cmdBytes)
 				if err != nil {
 					c.logger.Error("发送命令失败", zap.Error(err))
+					// 触发重连
+					if c.reconnectMgr != nil {
+						c.reconnectMgr.HandleError(err)
+					}
 				} else {
 					c.logger.Debug("命令发送成功", zap.Int("bytes_written", n))
 				}
@@ -805,7 +938,7 @@ func (c *ACMController) SendAlgoCommand(bet int, prize int) (map[string]interfac
 
 	// 构建命令
 	cmd := fmt.Sprintf("algo -b %d -p %d", bet, prize)
-	cmdBytes := []byte(cmd + "\r\n")  // 修复：使用\r\n与测试工具一致
+	cmdBytes := []byte(cmd + "\r\n") // 修复：使用\r\n与测试工具一致
 
 	// 打印发送的命令（ASCII和十六进制）
 	c.logger.Info("ACM发送algo命令",
@@ -914,22 +1047,38 @@ func (c *ACMController) SetFaultReportCallback(callback func(event *FaultEvent))
 
 // startAlgoTimer 启动Algo定时器
 func (c *ACMController) startAlgoTimer() {
+	// 使用互斥锁保护定时器状态
+	c.mu.Lock()
+
 	if c.algoTimer != nil {
+		c.logger.Info("Algo定时器已在运行，跳过启动")
+		c.mu.Unlock()
 		return // 定时器已经在运行
 	}
+
+	c.logger.Info("正在启动Algo定时器...",
+		zap.Duration("interval", c.config.AlgoTimerInterval),
+		zap.Int("bet", c.config.AlgoBet),
+		zap.Int("prize", c.config.AlgoPrize))
 
 	c.algoTimerStopCh = make(chan struct{})
 	c.algoTimer = time.NewTicker(c.config.AlgoTimerInterval)
 
+	// 释放锁，让goroutine可以独立运行
+	c.mu.Unlock()
+
 	go func() {
-		c.logger.Info("Algo定时器线程已启动")
+		c.logger.Info("Algo定时器线程已启动",
+			zap.Duration("interval", c.config.AlgoTimerInterval))
 
 		// 立即发送第一个命令
+		c.logger.Info("立即发送第一个algo命令...")
 		c.sendAlgoCommandAsync()
 
 		for {
 			select {
 			case <-c.algoTimer.C:
+				c.logger.Info("定时器触发，发送algo命令")
 				c.sendAlgoCommandAsync()
 			case <-c.algoTimerStopCh:
 				c.logger.Info("Algo定时器线程已停止")
@@ -944,15 +1093,24 @@ func (c *ACMController) startAlgoTimer() {
 
 // stopAlgoTimer 停止Algo定时器
 func (c *ACMController) stopAlgoTimer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.logger.Info("stopAlgoTimer开始执行")
+
 	if c.algoTimer != nil {
+		c.logger.Info("停止定时器ticker...")
 		c.algoTimer.Stop()
 		c.algoTimer = nil
 	}
 
 	if c.algoTimerStopCh != nil {
+		c.logger.Info("关闭algoTimerStopCh通道...")
 		close(c.algoTimerStopCh)
 		c.algoTimerStopCh = nil
 	}
+
+	c.logger.Info("stopAlgoTimer执行完成")
 }
 
 // sendAlgoCommandAsync 异步发送algo命令
@@ -960,27 +1118,32 @@ func (c *ACMController) sendAlgoCommandAsync() {
 	go func() {
 		cmd := fmt.Sprintf("algo -b %d -p %d", c.config.AlgoBet, c.config.AlgoPrize)
 
-		c.logger.Debug("定时发送algo命令",
+		c.logger.Info("【定时algo】发送命令",
 			zap.String("command", cmd),
 			zap.Time("timestamp", time.Now()))
 
 		// 发送命令并获取响应
 		response, err := c.SendAlgoCommand(c.config.AlgoBet, c.config.AlgoPrize)
 		if err != nil {
-			c.logger.Warn("定时algo命令执行失败",
+			c.logger.Error("【定时algo】命令执行失败",
 				zap.Error(err),
 				zap.String("command", cmd))
+
+			// 检查是否是串口I/O错误，触发重连
+			if c.reconnectMgr != nil {
+				c.reconnectMgr.HandleError(err)
+			}
 			return
 		}
 
 		// 记录响应（检查字段是否存在）
 		if response != nil {
-			c.logger.Info("定时algo命令响应",
+			c.logger.Info("【定时algo】命令响应成功",
 				zap.Any("response", response))
-			
+
 			// 安全地获取字段值
 			if win, ok := response["win"].(float64); ok {
-				c.logger.Debug("algo结果", zap.Float64("win", win))
+				c.logger.Info("【定时algo】结果", zap.Float64("win", win))
 			}
 		}
 	}()

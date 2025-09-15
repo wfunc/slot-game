@@ -23,10 +23,27 @@ GREEN=\033[0;32m
 YELLOW=\033[0;33m
 NC=\033[0m # No Color
 
-.PHONY: all build run clean test deps fmt lint help docs run-swagger fetch-redoc
+.PHONY: all build run clean test deps fmt lint help docs run-swagger fetch-redoc proto
 
 # 默认目标
 all: build
+
+# 编译 Protocol Buffers
+proto:
+	@echo "$(GREEN)编译 Protocol Buffers...$(NC)"
+	@mkdir -p internal/pb
+	@protoc --go_out=. --go_opt=paths=source_relative \
+		proto/*.proto
+	@# 移动生成的文件到正确位置
+	@if [ -d "internal/pb/proto" ]; then \
+		mv internal/pb/proto/* internal/pb/ 2>/dev/null || true; \
+		rmdir internal/pb/proto 2>/dev/null || true; \
+	fi
+	@# 如果文件生成在 proto 目录，移动到 internal/pb
+	@if [ -f "proto/animal.pb.go" ]; then \
+		mv proto/*.pb.go internal/pb/ 2>/dev/null || true; \
+	fi
+	@echo "$(GREEN)Proto 文件编译完成$(NC)"
 
 # 构建项目
 build:

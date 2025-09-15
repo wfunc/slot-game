@@ -185,3 +185,41 @@ type CoinDrop struct {
 	Session     PusherSession `gorm:"foreignKey:SessionID" json:"session,omitempty"`
 }
 
+// Jackpot JP奖池表
+type Jackpot struct {
+	BaseModel
+	GameID      uint      `gorm:"uniqueIndex:idx_game_type;not null" json:"game_id"`
+	Type        string    `gorm:"uniqueIndex:idx_game_type;size:20;not null" json:"type"` // JP1, JP2, JP3, JPALL
+	Amount      int64     `gorm:"default:0" json:"amount"`      // 当前奖池金额
+	MinAmount   int64     `gorm:"default:0" json:"min_amount"`  // 最小保底金额
+	MaxAmount   int64     `gorm:"default:0" json:"max_amount"`  // 最大限制金额
+	Percentage  float64   `gorm:"default:0" json:"percentage"`  // 抽成比例 (JP1: 0.10, JP2/JP3/JPALL: 0.05)
+	LastWonAt   *time.Time `json:"last_won_at,omitempty"`       // 上次中奖时间
+	LastWinner  uint      `json:"last_winner,omitempty"`        // 上次中奖用户ID
+	WinCount    int       `gorm:"default:0" json:"win_count"`   // 中奖次数统计
+	TotalIn     int64     `gorm:"default:0" json:"total_in"`    // 累计流入金额
+	TotalOut    int64     `gorm:"default:0" json:"total_out"`   // 累计流出金额
+	Status      string    `gorm:"size:20;default:'active'" json:"status"` // active, locked, disabled
+	
+	// 关联
+	Game        Game      `gorm:"foreignKey:GameID" json:"game,omitempty"`
+}
+
+// JackpotHistory JP中奖历史表
+type JackpotHistory struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	JackpotID   uint      `gorm:"not null;index" json:"jackpot_id"`
+	UserID      uint      `gorm:"not null;index" json:"user_id"`
+	SessionID   uint      `gorm:"not null;index" json:"session_id"`
+	ResultID    uint      `gorm:"not null;index" json:"result_id"`
+	Amount      int64     `gorm:"not null" json:"amount"`
+	PoolBefore  int64     `json:"pool_before"`  // 中奖前奖池金额
+	PoolAfter   int64     `json:"pool_after"`   // 中奖后奖池金额
+	WonAt       time.Time `json:"won_at"`
+	
+	// 关联
+	Jackpot     Jackpot     `gorm:"foreignKey:JackpotID" json:"jackpot,omitempty"`
+	Session     GameSession `gorm:"foreignKey:SessionID" json:"session,omitempty"`
+	Result      GameResult  `gorm:"foreignKey:ResultID" json:"result,omitempty"`
+}
+

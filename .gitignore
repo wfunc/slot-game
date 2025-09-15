@@ -143,6 +143,24 @@ yarn.lock
 /custom/
 /private/
 
+# 测试脚本（本地测试用）
+test_*.sh
+quick_test.sh
+deploy_to_device.sh
+test_acm_debug.go
+test_comprehensive.sh
+
+# 临时文档（修复文档）
+docs/*_FIX*.md
+docs/GIT_COMMIT_GUIDE.md
+
+# 本地同步脚本
+sync_proto.sh
+
+# 临时补丁文件
+*_patch.go
+reconnect_patch.go
+
 # claudedocs 目录（如果不想提交Claude生成的文档）
 # claudedocs/
 .DS_Store

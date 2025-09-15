@@ -21,6 +21,7 @@ type WalletRepository interface {
 	DeductBalance(ctx context.Context, userID uint, amount int64) error
 	LockForUpdate(ctx context.Context, userID uint) (*models.Wallet, error)
 	UpdateStatistics(ctx context.Context, userID uint, field string, amount int64) error
+	UpdateGameStatsTx(tx *gorm.DB, userID uint, betAmount, winAmount, coinsIn, coinsOut int64) error
 	CreateTransaction(ctx context.Context, transaction *models.WalletTransaction) error
 }
 
@@ -117,6 +118,8 @@ func (r *walletRepo) UpdateStatistics(ctx context.Context, userID uint, field st
 		"total_win":      true,
 		"total_bet":      true,
 		"total_deposit":  true,
+		"total_coins_in": true,
+		"total_coins_out": true,
 	}
 	
 	if !allowedFields[field] {
@@ -127,6 +130,33 @@ func (r *walletRepo) UpdateStatistics(ctx context.Context, userID uint, field st
 		Model(&models.Wallet{}).
 		Where("user_id = ?", userID).
 		Update(field, gorm.Expr(field+" + ?", amount)).Error
+}
+
+// UpdateGameStatsTx 在事务中更新游戏统计（包括投币/落币）
+func (r *walletRepo) UpdateGameStatsTx(tx *gorm.DB, userID uint, betAmount, winAmount, coinsIn, coinsOut int64) error {
+	updates := map[string]interface{}{
+		"total_bet":       gorm.Expr("total_bet + ?", betAmount),
+		"total_win":       gorm.Expr("total_win + ?", winAmount),
+		"total_coins_in":  gorm.Expr("total_coins_in + ?", coinsIn),
+		"total_coins_out": gorm.Expr("total_coins_out + ?", coinsOut),
+		"daily_bet":       gorm.Expr("daily_bet + ?", betAmount),
+		"daily_win":       gorm.Expr("daily_win + ?", winAmount),
+		"coins":          gorm.Expr("coins - ? + ?", betAmount, winAmount), // 更新游戏币余额
+	}
+	
+	result := tx.Model(&models.Wallet{}).
+		Where("user_id = ?", userID).
+		Updates(updates)
+	
+	if result.Error != nil {
+		return result.Error
+	}
+	
+	if result.RowsAffected == 0 {
+		return errors.New("钱包不存在")
+	}
+	
+	return nil
 }
 
 // CreateTransaction 创建交易记录

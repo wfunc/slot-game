@@ -1,0 +1,30 @@
+syntax = "proto2";
+
+package cfg;
+option go_package = "github.com/wfunc/slot-game/internal/pb";
+
+//=============================================================
+// @name cfg 20 配置
+//=============================================================
+
+// 获取信息
+// @name get_info
+message m_2001_tos{
+}
+
+message m_2001_toc{
+    required    uint32      role_id     = 1;
+    required    uint64      balance     = 2;
+}
+
+// 捕捉错误
+// @name get_error
+message m_2002_tos{
+    required    string      error       = 1; // 错误内容
+}
+message m_2002_toc{}
+
+//心跳包
+//@name heartbeat
+message m_2099_tos {}
+message m_2099_toc {}

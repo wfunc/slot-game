@@ -1,0 +1,432 @@
+syntax = "proto2";
+
+package animal;
+option go_package = "github.com/wfunc/slot-game/internal/pb";
+//=============================================================
+// @name animal 18 疯狂动物园
+//=============================================================
+
+// 进入房间
+// @name enter_room
+message m_1801_tos{
+    optional    e_zoo_type  type        = 1; // 动物园场类型
+}
+message m_1801_toc{
+    repeated    uint32      bet_val     = 1; // 下注档位
+    repeated    p_animal_odds odds      = 2; // 动物赔率
+    repeated    p_route     animals     = 3; // 路线
+    repeated    p_animal_player players = 4; // 玩家信息
+    required    bool        red_state   = 6; // 红包状态
+    repeated    p_animal_skill  skill   = 7; // 技能
+    required    uint32      time        = 8; // 技能剩余时间
+    optional    uint64      free_gold   = 9; // 体验币
+    optional    string      cj          =10; // 彩金
+}
+message p_animal_skill {
+    required    e_animal_skill_type type= 1; // 技能类型
+    required    uint32      val         = 2; // 技能数量
+    required    uint32      time        = 3; // 技能时间
+    optional    uint32      count       = 4; // 冰封技能的累计数
+}
+
+enum e_animal_skill_type{
+    skill_ice       = 1; // 冰冻技能
+    locking         = 2; // 锁定目标
+    improve_odds    = 3; // 倍率提升
+}
+
+message p_animal_odds{
+    required    e_animal    bet         = 1; // 动物名字
+    repeated    uint32      odds        = 2; // 赔率([1,2] -> 赔率1~2)
+}
+message p_route{
+    required    uint32      id          = 1; // 唯一ID
+    required    e_animal    bet         = 2; // 动物名字
+    required    uint32      line_id     = 3; // 路线
+    required    uint32      point       = 4; // 路径
+    required    bool        red_state   = 5; // 红包状态(true ->有红包, false -> 无红包)
+    required    e_animal_state  status  = 6; // 动物当前的状态 默认正常动物
+}
+enum e_animal_state {
+    state_normal    = 1; // 正常行走动物
+    state_ice       = 2; // 被冻结的动物
+}
+
+message p_animal_player{
+    required    uint32          role_id = 1; // 玩家ID
+    required    string          icon    = 2; // 玩家头像
+    required    string          name    = 3; // 玩家名字
+}
+
+
+// 兔子，骆驼，狮子，驴，豹子，猪，河马，大鹤，雷精灵，犀牛，恐龙，全屏炸弹
+enum e_animal{
+    balance     = 0; // 金豆
+    turtle      = 1; // 乌龟
+    cock        = 2; // 公鸡
+    dog         = 3; // 斗牛犬
+    monkey      = 4; // 金丝猴
+    horse       = 5; // 矮马
+    ox          = 6; // 奶牛
+    panda       = 7; // 熊猫
+    hippo       = 8; // 河马
+    lion        = 9; // 狮子
+    elephant    =10; // 大象
+    pikachu     =11; // 皮卡丘
+    bomber      =12; // 炸弹人
+    tiger       =13; // 老虎
+    sheep       =14; // 羊驼
+    bear        =15; // 熊
+    tuzi        =16; // 兔子
+    lv          =17; // 驴
+    baozi       =18; // 豹子
+    zhu         =19; // 猪
+    hema        =20; // 河马
+}
+
+// 离开房间
+// @name leave_room
+message m_1802_tos{}
+message m_1802_toc{
+    required    uint32      total_win   = 1;
+}
+
+// 下注
+// @name go_bet
+message m_1803_tos{
+    required    uint32      id          = 1; // 动物ID
+    optional    string      bullet_id   = 2; // 子弹 id
+}
+message m_1803_toc{
+    required    uint64      balance     = 1; // 当前玩家金豆
+    required    uint32      win         = 2; // 金豆
+    required    uint32      red_bag     = 3; // 红包
+    repeated    p_animal_skill  skill   = 4; // 技能列表（用于更新技能）
+    optional    uint64      free_gold   = 5; // 体验币
+    required    uint64      total_win   = 6; // 累计赢的分
+}
+
+// 查看玩家游戏记录
+// @name get_animal_record
+message m_1804_tos{
+    required    uint32      id          = 1;
+    required    uint32      amount      = 2; // 数量
+}
+message m_1804_toc{
+    repeated    p_player_animal   info    = 1; // 玩家疯狂动物记录
+}
+message p_player_animal{
+    required    uint32      id          = 1; // 唯一ID
+    required    uint32      time        = 3; // 时间
+    required    uint32      bet_val     = 4; // 投入金额
+    required    uint32      win         = 5; // 中奖金额
+    required    e_animal    animal      = 6; // 动物类型
+}
+
+// 查看近期大奖
+// @name get_animal_reward
+message m_1805_tos{}
+message m_1805_toc{
+    repeated    p_animal_reward info    = 1;
+}
+message p_animal_reward{
+    required    uint32      id          = 1;
+    required    e_animal    animal      = 2; // 动物
+    required    uint32      bet_val     = 3; // 下注金额
+    required    uint32      win         = 4; // 获得奖励
+    required    uint32      time        = 5;
+    required    string      name        = 6;
+    required    string      icon        = 7;
+    required    uint32      vip         = 8; // VIP
+}
+
+// 使用技能
+// @name use_animal_skill
+message m_1806_tos{
+    required    e_animal_skill_type type    = 1;
+}
+message m_1806_toc{
+    required    p_animal_skill  skill       = 1;
+}
+
+// 获取动物园所有场的信息
+// @name get_zoo_type_info
+message m_1807_tos{}
+message m_1807_toc{
+    repeated    p_zoo_type_info     info    = 1; // 动物园场信息
+}
+message p_zoo_type_info{
+    required    e_zoo_type          type    = 1; // 动物园场类型
+    repeated    uint32              bet_val = 2; // 下注档位
+    required    uint32              max_num = 3; // 当前人数
+    required    uint32              vip     = 4; // vip等级限制
+}
+
+
+// 购买道具
+// @name buy_tools
+message m_1808_tos{
+    required    e_animal_skill_type     type        = 1;
+}
+message m_1808_toc{}
+
+// 获取道具价格
+// @name get_tools_price
+message m_1809_tos{}
+message m_1809_toc{
+    required    uint32                  val         = 1;
+}
+
+// 推送彩金
+// @name push_cj
+message m_1810_toc{
+    required    string      bonus       = 1; // 累计的彩金
+}
+
+// 推送彩金中奖
+// @name push_cj_reward
+message m_1811_toc{
+    required    string      bonus       = 1;  // 中奖彩金金额
+}
+
+// 彩金记录
+// @name get_cj_log
+message m_1812_tos{}
+message m_1812_toc{
+    repeated    p_cj_log        list    = 1; // 列表
+}
+message p_cj_log{
+    required    uint32          id      = 1;
+    required    string          icon    = 2; // 头像
+    required    string          name    = 3; // 名字
+    required    uint32          time    = 4; // 时间
+    required    string          bonus   = 5; // 彩金
+}
+
+// 推送玩家头像显示一击必杀
+// @name push_one_blow
+message m_1813_toc{
+    required    uint32          role_id = 1;
+    required    uint32          time    = 2; // 倒计时
+    required    uint32          bet_val = 3; // 下注金额
+}
+
+// 清除玩家头像显示一击必杀
+// @name clear_one_blow
+message m_1814_toc{
+    required    uint32          role_id = 1;
+}
+
+
+// 发射子弹
+// @name fire_bullet
+message m_1815_tos{
+    required    uint32      bet_val     = 1; // 下注金额
+}
+
+message m_1815_toc{
+    required    string      bullet_id   = 1; // 子弹 id
+    required    uint64      balance     = 2; // 余额
+}
+
+// 推送玩家打动物
+// @name push_hit_animal
+message m_1899_toc{
+    required    uint32      role_id     = 1; // 玩家ID
+    required    uint32      id          = 2; // 动物ID
+}
+
+// 推送动物离开
+// @name push_leave_animal
+message m_1888_toc{
+    required    uint32      id      = 1; // 动物ID
+}
+
+// 推送动物进来
+// @name push_animal_enter
+message m_1887_toc{
+    repeated    p_route     animal  = 1; // 动物进来房间的路径
+}
+
+// 推送玩家进入房间
+// @name push_role_enter
+message m_1886_toc{
+    required    p_animal_player player  = 1; // 玩家信息
+}
+
+// 推送玩家离开房间
+// @name push_role_leave
+message m_1885_toc{
+    required    uint32      role_id     = 1; // 玩家ID
+}
+
+// 推送动物被打死
+// @name push_animal_die
+message m_1884_toc{
+    required    uint32      role_id     = 1; // 玩家ID
+    required    e_animal_type   type    = 2; // 动物死亡伴随的技能效果
+    repeated    p_animal_one    ids     = 3; // 打中的动物列表
+}
+message p_animal_one{
+    required    uint32      id      = 1; // 动物ID
+    required    uint32      win     = 2; // 赢的钱
+    required    uint32      red_bag = 3; // 红包
+}
+enum e_animal_type{
+    lightning   = 1; // 皮卡丘的闪电
+    type_normal = 2; // 一般
+    boom        = 3; // 炸弹人的全屏炸弹
+}
+
+// 推送动物还有多久进场
+// @name push_animal_coming
+message m_1883_toc{
+    required    e_animal    animal  = 1;
+    required    uint32      time    = 2;
+}
+
+// 推送玩家使用技能
+// @name push_role_use_skill
+message m_1882_toc{
+    required    uint32      role_id         = 1; // 玩家ID
+    required    e_animal_skill_type type    = 2; // 技能类型
+    required    uint32      time            = 3; // 技能剩余时间
+    repeated    uint32      ids             = 4; // 被技能打中动物列表
+}
+
+
+// 活动场
+// 进入游戏
+// @name enter_activity
+message m_1871_tos{
+    required    uint32      agent_id    = 1; // 合作商唯一的ID
+}
+message m_1871_toc{
+    repeated    uint32      bet_val     = 1; // 下注档位
+    repeated    p_animal_odds odds      = 2; // 动物赔率
+    repeated    p_route     animals     = 3; // 路线
+    required    uint32     time         = 4; // 倒计时
+    required    uint32     state        = 5; // 1准备状态，2活动期间，3开奖，4空闲
+    required    uint64     gold         = 6; // 玩家总金豆
+    repeated    p_rank     rank         = 7; // 排行榜信息
+    required    uint64     score        = 8; // 积分
+    repeated    p_activity_reward     reward        = 9; // 奖励信息
+}
+
+message p_activity_reward{
+    required    uint32     min        = 1; // 最小排名
+    required    uint32     max        = 2; // 最大排名
+    required    string     desc        = 3; // 奖励描述
+}
+
+message p_rank{
+    required    uint32      id          = 1; // 名次
+    required    uint32      role_id     = 2; // 玩家ID
+    required    string      name        = 3; // 玩家名字
+    required    string      icon        = 4; // 玩家头像
+    required    uint64      val         = 5; // 排行值
+    required    uint32      vip         = 6; // VIP
+}
+
+
+// 打动物
+// @name hit_activity_animal
+message m_1872_tos{
+    required    uint32      id          = 1; // 动物ID
+    required    uint32      bet_val     = 2; // 下注金额
+}
+message m_1872_toc{
+    required    uint64      balance     = 1; // 当前玩家金豆
+    required    uint32      score       = 2; // 积分
+}
+
+// 获取排行榜
+// @name get_activity_rank
+message m_1873_tos{
+    required    uint32      id          = 1; // 排行榜名字，前端从0开始
+    required    uint32      num          = 2; // 排行数量
+}
+message m_1873_toc{
+    repeated p_rank  rank = 1;
+}
+
+// 推送动物离开
+// @name push_activity_animal
+message m_1874_toc{
+    repeated    uint32      id      = 1; // 动物ID
+}
+
+// 活动结束玩家推出
+// @name push_activity_out
+message m_1875_toc{
+    required    uint64     gold      =1;//玩家金豆
+    repeated    p_rank     rank      =2;//排行榜，前10
+}
+
+// 推送动物进来
+// @name push_activity_animal_enter
+message m_1876_toc{
+    repeated    p_route     animal  = 1; // 动物进来房间的路径
+}
+
+// 推送动物被打死
+// @name push_activity_animal_die
+message m_1877_toc{
+    required    uint32      role_id     = 1; // 玩家ID
+    required    e_animal_type   type    = 2; // 动物死亡伴随的技能效果
+    repeated    p_animal_one    ids     = 3; // 打中的动物列表
+}
+
+// 推送活动状态
+// @name push_activity_state
+message m_1878_toc{
+    required    uint32     time         = 1; // 倒计时
+    required    uint32     state        = 2; // 活动状态 1准备状态，2活动期间，3开奖，4空闲
+}
+
+
+// 观战视角进入
+// @name look_activity
+message m_1879_tos{
+    required    uint32      agent_id    = 1; // 合作商的唯一ID
+}
+
+message m_1879_toc{
+    repeated    p_route    animals     = 1; // 路线
+    required    uint32     time         = 2; // 倒计时
+    required    uint32     state        = 3; // 1准备状态，2活动期间，3开奖，4空闲
+    repeated    p_rank     rank         = 4; // 排行榜信息
+    repeated    p_activity_reward     reward        = 5; // 奖励信息
+    required    uint32     agent_id        = 6; // 渠道id
+}
+
+// 推送排行
+// @name push_activity_rank
+message m_1880_toc{
+    repeated p_rank  rank = 1;
+}
+
+// 推送点击
+// @name push_activity_hit
+message m_1881_toc{
+    required    uint32     id         = 1; // 动物唯一id
+}
+
+// 推送广播
+// @name push_activity_broadcast
+message m_1889_toc{
+    required    string     name         = 1; // 玩家名字
+    required    string     icon         = 2; // 玩家头像
+    required    e_animal   animal_name         = 3; // 动物名字
+    required    uint64     score        = 4; // 获得积分
+}
+
+enum e_zoo_type{
+    civilian    = 1; // 平民场
+    petty       = 2; // 小资场
+    rich        = 3; // 富豪场
+    gold        = 4; // 黄金场
+    diamond     = 5; // 钻石场
+    single      = 6; // 单人场
+    free        = 7; // 体验场
+}

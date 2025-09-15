@@ -1,0 +1,109 @@
+syntax = "proto2";
+
+package slot;
+option go_package = "github.com/wfunc/slot-game/internal/pb";
+
+//=============================================================
+// @name slot 19 拉霸机-麻将
+//=============================================================
+
+// 进入房间
+// @name enter_room
+message m_1901_tos{
+    optional    e_slot_type  type        = 1; // 拉霸机场类型
+}
+
+message m_1901_toc{
+    repeated    uint32      bet_val     = 1; // 下注档位
+    repeated    p_slot_odds odds        = 2; // 拉霸机赔率
+    required    p_config    cfg         = 3; // 配置
+}
+
+message p_config{
+    required    string      dev_id      = 1;
+    required    uint32      dev_no      = 2;
+}
+
+// 开始游戏
+// @name start_game
+message m_1902_tos{
+    required    uint32      bet_val     = 1; // 下注金额
+}
+message m_1902_toc{
+    required    uint32      bet_val     = 1; // 下注金额
+    required    uint32      win         = 2; // 当前这手赢得金币
+    required    uint32      total_win   = 3; // 总共赢得金币
+    required    bool        is_free     = 4; // 是否免费
+    required    uint32      current_free= 5; // 当前第几次免费
+    required    uint32      total_free  = 6; // 总共免费次数
+    required    p_slot_result result    = 7; // 结果
+}
+
+message p_slot_result{
+    repeated    e_slot_bet_type line1    = 1; // 第一行
+    repeated    e_slot_bet_type line2    = 2; // 第二行
+    repeated    e_slot_bet_type line3    = 3; // 第三行
+    repeated    e_slot_bet_type line4    = 4; // 第四行
+    repeated    e_slot_bet_type line5    = 5; // 第五行
+    repeated    p_slot_reward rewards    = 6; // 奖励
+}
+
+message p_slot_reward{
+    required    e_slot_bet_type type    = 1; // 奖励类型
+    required    uint32          val     = 2; // 奖励值
+    repeated    uint32          pos     = 3; // 奖励位置
+}
+
+// 推送数据
+// @name push_data
+message m_1903_toc{
+    required    uint32      coins       = 1; // 投币数
+    required    uint32      remain      = 2; // 余分
+    required    uint32      down_coins  = 3; // 落币
+    required    uint32      jp1         = 4; // JP1
+    required    uint32      jp2         = 5; // JP2
+    required    uint32      jp3         = 6; // JP3
+    required    uint32      jp_all      = 7; // JPALL
+}
+
+// 推送中 JP
+// @name push_jp_reward
+message m_1904_toc{
+    required    string      dev_id      = 1; // 设备 id
+    required    uint32      dev_no      = 2; // 机台号
+    required    uint32      type        = 3; // 1-4
+    required    uint32      jp          = 4; // 中 jp 值
+}
+
+
+enum e_slot_type{
+    e_slot_type_mahjong = 1; // 拉霸机-麻将
+    e_slot_type_pharaoh = 2; // 拉霸机-法老王
+    e_slot_type_777 = 3; // 拉霸机-777
+}
+
+enum e_slot_bet_type{
+    e_slot_bet_type_0 = 0;
+    e_slot_bet_type_1 = 1;
+    e_slot_bet_type_2 = 2;
+    e_slot_bet_type_3 = 3;
+    e_slot_bet_type_4 = 4;
+    e_slot_bet_type_5 = 5;
+    e_slot_bet_type_6 = 6;  
+    e_slot_bet_type_7 = 7;
+    e_slot_bet_type_wild = 8; // wild
+    e_slot_bet_type_free = 9; // 免费符
+    e_slot_bet_type_gold_0 = 16; // 黄金牌0
+    e_slot_bet_type_gold_1 = 17; // 黄金牌1
+    e_slot_bet_type_gold_2 = 18; // 黄金牌2
+    e_slot_bet_type_gold_3 = 19; // 黄金牌3
+    e_slot_bet_type_gold_4 = 20; // 黄金牌4
+    e_slot_bet_type_gold_5 = 21; // 黄金牌5
+    e_slot_bet_type_gold_6 = 22; // 黄金牌6
+    e_slot_bet_type_gold_7 = 23; // 黄金牌7
+}
+
+message p_slot_odds{
+    required    uint32      odds        = 1; // 赔率
+    required    uint32      val         = 2; // 下注值
+}

@@ -19,6 +19,8 @@ type Wallet struct {
 	TotalWithdraw   int64     `gorm:"default:0" json:"total_withdraw"`
 	TotalBet        int64     `gorm:"default:0" json:"total_bet"`
 	TotalWin        int64     `gorm:"default:0" json:"total_win"`
+	TotalCoinsIn    int64     `gorm:"default:0" json:"total_coins_in"`  // 总投币数
+	TotalCoinsOut   int64     `gorm:"default:0" json:"total_coins_out"` // 总落币数
 	DailyBet        int64     `gorm:"default:0" json:"daily_bet"`
 	DailyWin        int64     `gorm:"default:0" json:"daily_win"`
 	LastResetAt     time.Time `json:"last_reset_at"`

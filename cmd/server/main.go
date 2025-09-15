@@ -715,12 +715,23 @@ func (s *Server) closeComponents() error {
 		s.logger.Info("定时清理任务已停止")
 	}
 	
-	// 关闭串口连接
-	if s.serialController != nil {
-		if err := s.serialController.Disconnect(); err != nil {
-			s.logger.Error("关闭串口失败", zap.Error(err))
+	// 关闭STM32控制器
+	if s.stm32Controller != nil {
+		s.logger.Info("关闭STM32控制器...")
+		if err := s.stm32Controller.Disconnect(); err != nil {
+			s.logger.Error("关闭STM32控制器失败", zap.Error(err))
 		} else {
-			s.logger.Info("串口连接已关闭")
+			s.logger.Info("STM32控制器已关闭")
+		}
+	}
+	
+	// 关闭ACM控制器
+	if s.acmController != nil {
+		s.logger.Info("关闭ACM控制器...")
+		if err := s.acmController.Disconnect(); err != nil {
+			s.logger.Error("关闭ACM控制器失败", zap.Error(err))
+		} else {
+			s.logger.Info("ACM控制器已关闭")
 		}
 	}
 	

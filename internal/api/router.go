@@ -15,16 +15,17 @@ import (
 
 // Router API路由器
 type Router struct {
-	engine         *gin.Engine
-	db             *gorm.DB
-	services       *service.Services
-	authHandler    *AuthHandler
-	slotHandler    *SlotHandler
-	walletHandler  *WalletHandler
-	wsHandler      *WebSocketHandler
-	wsHub          *ws.Hub
-	authMiddleware *middleware.AuthMiddleware
-	log            *zap.Logger
+	engine            *gin.Engine
+	db                *gorm.DB
+	services          *service.Services
+	authHandler       *AuthHandler
+	slotHandler       *SlotHandler
+	walletHandler     *WalletHandler
+	wsHandler         *WebSocketHandler
+	protobufWsHandler *ProtobufWebSocketHandler
+	wsHub             *ws.Hub
+	authMiddleware    *middleware.AuthMiddleware
+	log               *zap.Logger
 }
 
 // NewRouter 创建路由器
@@ -61,6 +62,7 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	// 创建处理器
 	authHandler := NewAuthHandler(services.Auth, services.User)
 	wsHandler := NewWebSocketHandler(wsHub, log)
+	protobufWsHandler := NewProtobufWebSocketHandler(db, log)
 	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), wsHandler, log)
 	walletHandler := NewWalletHandler(db, log)
 
@@ -68,16 +70,17 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	authMiddleware := middleware.NewAuthMiddleware(services.Auth)
 
 	router := &Router{
-		engine:         engine,
-		db:             db,
-		services:       services,
-		authHandler:    authHandler,
-		slotHandler:    slotHandler,
-		walletHandler:  walletHandler,
-		wsHandler:      wsHandler,
-		wsHub:          wsHub,
-		authMiddleware: authMiddleware,
-		log:            log,
+		engine:            engine,
+		db:                db,
+		services:          services,
+		authHandler:       authHandler,
+		slotHandler:       slotHandler,
+		walletHandler:     walletHandler,
+		wsHandler:         wsHandler,
+		protobufWsHandler: protobufWsHandler,
+		wsHub:             wsHub,
+		authMiddleware:    authMiddleware,
+		log:               log,
 	}
 
 	// 设置路由
@@ -185,6 +188,7 @@ func (r *Router) setupRoutes() {
 	{
 		ws.GET("/game", r.authMiddleware.OptionalAuth(), r.wsHandler.GameWebSocket)
 		ws.GET("/online", r.wsHandler.GetOnlineCount)
+		ws.GET("/slot", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的老虎机游戏
 	}
 
 	// 静态文件服务

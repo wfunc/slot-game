@@ -27,11 +27,16 @@ func AutoMigrate() error {
 		&models.GameRoom{},
 		&models.GameSession{},
 		&models.GameResult{},
+		&models.GameState{},  // 添加游戏状态表
 		
 		// 老虎机相关
 		&models.SlotMachine{},
 		&models.SlotSpin{},
 		&models.SlotWinLine{},
+		
+		// JP奖池相关
+		&models.Jackpot{},
+		&models.JackpotHistory{},
 		
 		// 推币机相关
 		&models.PusherMachine{},
