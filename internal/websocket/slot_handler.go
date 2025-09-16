@@ -292,14 +292,29 @@ func (h *SlotHandler) handleStartGame(session *SlotSessionSimple, data []byte) {
 		log.Printf("[SlotHandler] 游戏执行失败: %v", err)
 		return
 	}
-	
+
+	// 检测Animal游戏触发
+	var animalTrigger *slot.AnimalTriggerData
+	triggerDetector := slot.NewTriggerDetector(nil) // 使用默认配置
+
+	// 获取最终网格进行触发检测
+	var finalGrid [][]int
+	if len(result.CascadeDetails) > 0 {
+		finalGrid = result.CascadeDetails[len(result.CascadeDetails)-1].GridAfter
+	} else {
+		finalGrid = result.InitialGrid
+	}
+
+	// 检测是否触发Animal游戏
+	animalTrigger = triggerDetector.DetectAnimalTrigger(finalGrid)
+
 	// 更新余额和落币数
 	session.mu.Lock()
 	// 余额不变（不加中奖金额）
 	// session.Balance 保持不变，中奖金额累计到落币数
 	session.TotalWin = result.TotalWin  // 记录本次中奖
 	session.TotalDownCoins += result.TotalWin  // 累计到总落币数
-	
+
 	// 检查免费游戏
 	isFree := false
 	currentFree := uint32(0)
@@ -392,6 +407,37 @@ func (h *SlotHandler) handleStartGame(session *SlotSessionSimple, data []byte) {
 	// 发送响应
 	if err := h.sendMessage(session, 1902, resp); err != nil {
 		log.Printf("[SlotHandler] 发送游戏结果失败: %v", err)
+	}
+
+	// 检查是否触发了Animal游戏
+	if animalTrigger != nil {
+		log.Printf("[SlotHandler] 触发Animal游戏: type=%s, rounds=%d, multiplier=%.2f",
+			animalTrigger.Type,
+			animalTrigger.FreeRounds,
+			animalTrigger.Multiplier)
+
+		// 发送Animal触发通知
+		triggerNotify := &pb.M_9903Toc{
+			Triggered:    proto.Bool(true),
+			TriggerType:  proto.String(string(animalTrigger.Type)),
+			BridgeData: &pb.PBridgeData{
+				FreeRounds:  proto.Uint32(uint32(animalTrigger.FreeRounds)),
+				Multiplier:  proto.Float32(float32(animalTrigger.Multiplier)),
+				BonusPool:   proto.Uint64(uint64(animalTrigger.BonusPool)),
+				TriggerType: proto.String(string(animalTrigger.Type)),
+			},
+		}
+
+		// 添加触发位置信息
+		for _, pos := range animalTrigger.Positions {
+			posIdx := uint32(pos.Row*5 + pos.Reel) // 转换为线性索引
+			triggerNotify.BridgeData.TriggerPos = append(triggerNotify.BridgeData.TriggerPos, posIdx)
+		}
+
+		// 发送触发通知
+		if err := h.sendMessage(session, 9903, triggerNotify); err != nil {
+			log.Printf("[SlotHandler] 发送Animal触发通知失败: %v", err)
+		}
 	}
 	
 	// 推送最新数据

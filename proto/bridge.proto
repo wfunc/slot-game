@@ -1,0 +1,56 @@
+syntax = "proto2";
+
+package bridge;
+option go_package = "github.com/wfunc/slot-game/internal/pb";
+
+//=============================================================
+// @name bridge 99 游戏桥接
+//=============================================================
+
+// 游戏切换通知
+// @name game_switch
+message m_9901_toc {
+    required    e_switch_type   type        = 1; // 切换类型
+    required    string          from_game   = 2; // 源游戏
+    required    string          to_game     = 3; // 目标游戏
+    optional    p_bridge_data   data        = 4; // 桥接数据
+}
+
+// 桥接数据
+message p_bridge_data {
+    optional    uint32      free_rounds     = 1; // 免费次数
+    optional    float       multiplier      = 2; // 倍率
+    optional    uint64      bonus_pool      = 3; // 奖池
+    optional    string      trigger_type    = 4; // 触发类型
+    repeated    uint32      trigger_pos     = 5; // 触发位置
+}
+
+// 切换类型
+enum e_switch_type {
+    switch_immediate    = 1;  // 立即切换
+    switch_after_round  = 2;  // 回合结束后切换
+    switch_optional     = 3;  // 可选切换（玩家选择）
+}
+
+// Animal游戏触发通知
+// @name animal_trigger_notify
+message m_9903_toc {
+    required    bool            triggered       = 1; // 是否触发
+    required    string          trigger_type    = 2; // 触发类型
+    optional    p_bridge_data   bridge_data     = 3; // 桥接数据
+}
+
+// 游戏返回通知
+// @name game_return
+message m_9902_toc {
+    required    string          from_game       = 1; // 从哪个游戏返回
+    required    uint64          bonus_win       = 2; // bonus游戏赢分
+    optional    p_bridge_result bridge_result   = 3; // 桥接结果
+}
+
+// 桥接结果
+message p_bridge_result {
+    required    uint64      total_win       = 1; // 总赢分
+    optional    uint32      achievements    = 2; // 成就数量
+    optional    string      extra_data      = 3; // 额外数据(JSON)
+}

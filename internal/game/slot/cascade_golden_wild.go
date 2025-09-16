@@ -17,6 +17,9 @@ type GoldenWildCascadeEngine struct {
 	
 	// 1024线匹配器
 	line1024Matcher *Line1024Matcher
+	
+	// Animal触发检测器
+	triggerDetector *TriggerDetector
 }
 
 // GoldenWildConfig 金色Wild配置
@@ -59,6 +62,9 @@ type GoldenWildResult struct {
 	WildTransitions  []WildTransition   `json:"wild_transitions"`  // Wild转换记录
 	FinalWildCount   int                `json:"final_wild_count"`  // 最终Wild数量
 	WildPositions    []GamePosition     `json:"wild_positions"`    // Wild位置
+	
+	// Animal触发数据
+	AnimalTrigger    *AnimalTriggerData `json:"animal_trigger,omitempty"` // Animal游戏触发数据
 }
 
 // GoldenSymbolInfo 金色符号信息
@@ -100,6 +106,7 @@ func NewGoldenWildCascadeEngine(algorithmConfig *AlgorithmConfig, cascadeConfig 
 			NewWilds:    make(map[string]GamePosition),
 		},
 		line1024Matcher: NewLine1024Matcher(cascadeConfig),
+		triggerDetector: NewTriggerDetector(GetDefaultAnimalTriggerConfig()),
 	}
 }
 
@@ -186,7 +193,14 @@ func (e *GoldenWildCascadeEngine) SpinWithGoldenWild(ctx context.Context, reques
 		stepNumber++
 	}
 	
-	// 3. 构建结果
+	// 3. 检测Animal游戏触发
+	var animalTrigger *AnimalTriggerData
+	if e.triggerDetector != nil {
+		// 使用原始网格检测触发（在消除之前的状态）
+		animalTrigger = e.triggerDetector.DetectAnimalTrigger(originalInitialGrid)
+	}
+	
+	// 4. 构建结果
 	result := &GoldenWildResult{
 		CascadeResult: &CascadeResult{
 			AbstractGameResult: &AbstractGameResult{
@@ -207,32 +221,48 @@ func (e *GoldenWildCascadeEngine) SpinWithGoldenWild(ctx context.Context, reques
 		WildTransitions: wildTransitions,
 		FinalWildCount:  len(e.wildTracker.ActiveWilds),
 		WildPositions:   e.getWildPositions(),
+		AnimalTrigger:   animalTrigger, // 添加触发数据
 	}
 	
 	return result, nil
 }
 
-// generateGridWithGolden 生成包含金色符号的初始网格
+// generateGridWithGolden 生成包含金色符号和Animal触发符号的初始网格
 func (e *GoldenWildCascadeEngine) generateGridWithGolden() ([][]int, []GoldenSymbolInfo) {
 	grid := make([][]int, e.cascadeConfig.GridHeight)
 	goldenSymbols := []GoldenSymbolInfo{}
 	
+	// Animal触发符号出现概率
+	animalWildProb := 0.02    // 2%概率出现Animal Wild
+	animalBonusProb := 0.01   // 1%概率出现Animal Bonus
+	
 	for i := range grid {
 		grid[i] = make([]int, e.cascadeConfig.GridWidth)
 		for j := range grid[i] {
-			// 生成基础符号
-			symbolID := e.abstractEngine.(*AbstractSlotEngine).randomGen.NextInt(0, e.abstractEngine.GetAlgorithmConfig().SymbolCount)
-			grid[i][j] = symbolID
+			// 先检查是否生成特殊符号
+			rand := e.abstractEngine.(*AbstractSlotEngine).randomGen.Next()
 			
-			// 检查是否变成金色
-			if e.canBeGolden(symbolID) && e.shouldBeGolden() {
-				goldenInfo := GoldenSymbolInfo{
-					Position:   GamePosition{Row: i, Reel: j},
-					OriginalID: symbolID,
-					IsGolden:   true,
-					BecameWild: false, // 初始时还不是Wild
+			if rand < animalBonusProb {
+				// 生成Animal Bonus符号
+				grid[i][j] = SYMBOL_ANIMAL_BONUS
+			} else if rand < animalBonusProb + animalWildProb {
+				// 生成Animal Wild符号
+				grid[i][j] = SYMBOL_ANIMAL_WILD
+			} else {
+				// 生成普通符号
+				symbolID := e.abstractEngine.(*AbstractSlotEngine).randomGen.NextInt(0, e.abstractEngine.GetAlgorithmConfig().SymbolCount)
+				grid[i][j] = symbolID
+				
+				// 检查是否变成金色
+				if e.canBeGolden(symbolID) && e.shouldBeGolden() {
+					goldenInfo := GoldenSymbolInfo{
+						Position:   GamePosition{Row: i, Reel: j},
+						OriginalID: symbolID,
+						IsGolden:   true,
+						BecameWild: false, // 初始时还不是Wild
+					}
+					goldenSymbols = append(goldenSymbols, goldenInfo)
 				}
-				goldenSymbols = append(goldenSymbols, goldenInfo)
 			}
 		}
 	}
