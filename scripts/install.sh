@@ -222,6 +222,7 @@ ExecStartPre=/bin/bash -c 'timeout=30; while [ $timeout -gt 0 ]; do \
 # 启动 Chromium（使用您验证过的配置）
 ExecStart=/usr/bin/chromium \
     --user-data-dir=/tmp/chromium-kiosk \
+    --autoplay-policy=no-user-gesture-required \
     --kiosk \
     --start-fullscreen \
     --new-window \
