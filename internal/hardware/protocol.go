@@ -10,7 +10,8 @@ import (
 const (
 	FrameHeader byte   = 0xAA
 	FrameTail   byte   = 0x55
-	MinFrameLen uint16 = 9 // 最小帧长度：帧头(1) + 长度(2) + 命令(1) + 序列号(2) + CRC(2) + 帧尾(1)
+	MinFrameLen uint8  = 7 // 最小帧长度：帧头(1) + 长度(1) + 命令(1) + 序列号(2) + XOR(1) + 帧尾(1)
+	MaxFrameLen uint8  = 255 // v1.2: 最大帧长度限制为255字节
 )
 
 // 命令码定义
@@ -37,8 +38,7 @@ const (
 
 	// 系统指令
 	CmdHeartbeat byte = 0x31 // 心跳包
-	CmdACK       byte = 0x80 // ACK确认
-	CmdNACK      byte = 0x81 // NACK拒绝
+	// v1.2: 删除ACK/NACK，使用Echo确认机制
 )
 
 // 按键类型
@@ -145,34 +145,34 @@ const (
 	FaultNoResource  byte = 0x09 // 资源不足（币/彩票）
 )
 
-// Frame 数据帧结构
+// Frame 数据帧结构 (v1.2)
 type Frame struct {
 	Header   byte   // 帧头
-	Length   uint16 // 长度
+	Length   uint8  // 长度 (v1.2: 1字节，最大255)
 	Command  byte   // 命令码
-	Sequence uint16 // 序列号
+	Sequence uint16 // 序列号 (v1.2: 小端序)
 	Data     []byte // 数据
-	CRC16    uint16 // CRC校验
+	XOR      uint8  // XOR校验 (v1.2: 替代CRC16)
 	Tail     byte   // 帧尾
-	Version  byte   // 协议版本（用于心跳等需要版本协商的命令）
+	Version  uint16 // 协议版本（v1.2 = 0x0102 小端序）
 }
 
-// DeviceStatus 设备状态结构
+// DeviceStatus 设备状态结构 (v1.2: uint16/uint32字段使用小端序)
 type DeviceStatus struct {
 	DeviceType    byte   // 设备类型
-	FirmwareVer   uint16 // 固件版本
+	FirmwareVer   uint16 // 固件版本（小端序）
 	StatusFlags   byte   // 状态标志位
 	ErrorCode     byte   // 错误码
 	CoinMotor     byte   // 上币电机状态
 	ReturnMotor   byte   // 退币电机状态
 	PushMotor     byte   // 推币电机状态
 	TicketPrinter byte   // 彩票机状态
-	CoinCount     uint16 // 币仓余量
-	TicketCount   uint16 // 彩票余量
+	CoinCount     uint16 // 币仓余量（小端序）
+	TicketCount   uint16 // 彩票余量（小端序）
 	Temperature   byte   // 设备温度
 	ErrorFlags    byte   // 错误标志位
-	Voltage       uint16 // 电压（毫伏）
-	RunTime       uint32 // 运行时间（秒）
+	Voltage       uint16 // 电压（毫伏，小端序）
+	RunTime       uint32 // 运行时间（秒，小端序）
 }
 
 // CoinReturnData 回币数据（优化后的格式）
@@ -198,11 +198,11 @@ type FaultEvent struct {
 	ExtraInfo  []byte // 附加信息
 }
 
-// ProgressReport 执行进度报告
+// ProgressReport 执行进度报告 (v1.2: uint16字段使用小端序)
 type ProgressReport struct {
 	OriginalCmd byte   // 原命令码
-	Completed   uint16 // 已完成
-	Total       uint16 // 总数
+	Completed   uint16 // 已完成（小端序）
+	Total       uint16 // 总数（小端序）
 	Status      byte   // 状态
 }
 
@@ -217,142 +217,141 @@ func NewFrame(cmd byte, seq uint16, data []byte) *Frame {
 	}
 	
 	// 计算长度（整个帧的长度）
-	f.Length = uint16(9 + len(data)) // 9 = 帧头(1) + 长度(2) + 命令(1) + 序列号(2) + CRC(2) + 帧尾(1)
-	
-	// 计算CRC
-	f.CRC16 = f.CalculateCRC()
+	frameLen := 7 + len(data) // 7 = 帧头(1) + 长度(1) + 命令(1) + 序列号(2) + XOR(1) + 帧尾(1)
+	if frameLen > int(MaxFrameLen) {
+		// 帧长度超过限制
+		return nil
+	}
+	f.Length = uint8(frameLen)
+
+	// 计算XOR
+	f.XOR = f.CalculateXOR()
 	
 	return f
 }
 
-// ToBytes 将帧转换为字节数组
+// ToBytes 将帧转换为字节数组 (v1.2)
 func (f *Frame) ToBytes() []byte {
 	buf := make([]byte, f.Length)
 	idx := 0
-	
+
 	// 帧头
 	buf[idx] = f.Header
 	idx++
-	
-	// 长度（大端序）
-	binary.BigEndian.PutUint16(buf[idx:], f.Length)
-	idx += 2
-	
+
+	// 长度（v1.2: 1字节）
+	buf[idx] = f.Length
+	idx++
+
 	// 命令
 	buf[idx] = f.Command
 	idx++
-	
-	// 序列号（大端序）
-	binary.BigEndian.PutUint16(buf[idx:], f.Sequence)
+
+	// 序列号（v1.2: 小端序）
+	binary.LittleEndian.PutUint16(buf[idx:], f.Sequence)
 	idx += 2
-	
+
 	// 数据
 	if len(f.Data) > 0 {
 		copy(buf[idx:], f.Data)
 		idx += len(f.Data)
 	}
-	
-	// CRC16（大端序）
-	binary.BigEndian.PutUint16(buf[idx:], f.CRC16)
-	idx += 2
-	
+
+	// XOR校验（v1.2: 1字节）
+	buf[idx] = f.XOR
+	idx++
+
 	// 帧尾
 	buf[idx] = f.Tail
-	
+
 	return buf
 }
 
-// FromBytes 从字节数组解析帧
+// FromBytes 从字节数组解析帧 (v1.2)
 func (f *Frame) FromBytes(data []byte) error {
 	if len(data) < int(MinFrameLen) {
 		return fmt.Errorf("frame too short: %d < %d", len(data), MinFrameLen)
 	}
-	
+
 	// 检查帧头
 	if data[0] != FrameHeader {
 		return fmt.Errorf("invalid frame header: 0x%02X", data[0])
 	}
-	
-	// 解析长度
+
+	// 解析长度（v1.2: 1字节）
 	f.Header = data[0]
-	f.Length = binary.BigEndian.Uint16(data[1:3])
-	
+	f.Length = data[1]
+
 	// 检查数据长度
 	if len(data) < int(f.Length) {
 		return fmt.Errorf("incomplete frame: %d < %d", len(data), f.Length)
 	}
-	
+
 	// 检查帧尾
 	if data[f.Length-1] != FrameTail {
 		return fmt.Errorf("invalid frame tail: 0x%02X", data[f.Length-1])
 	}
-	
+
 	// 解析字段
-	f.Command = data[3]
-	f.Sequence = binary.BigEndian.Uint16(data[4:6])
-	
+	f.Command = data[2]
+	f.Sequence = binary.LittleEndian.Uint16(data[3:5]) // v1.2: 小端序
+
 	// 解析数据
-	dataLen := f.Length - 9
+	dataLen := int(f.Length) - 7 // 7 = 基础字段长度
 	if dataLen > 0 {
 		f.Data = make([]byte, dataLen)
-		copy(f.Data, data[6:6+dataLen])
+		copy(f.Data, data[5:5+dataLen])
 	}
-	
-	// 解析CRC
-	crcIdx := f.Length - 3
-	f.CRC16 = binary.BigEndian.Uint16(data[crcIdx:crcIdx+2])
+
+	// 解析XOR（v1.2: 1字节）
+	xorIdx := f.Length - 2
+	f.XOR = data[xorIdx]
 	f.Tail = data[f.Length-1]
-	
-	// 验证CRC
-	calcCRC := f.CalculateCRC()
-	if calcCRC != f.CRC16 {
-		return fmt.Errorf("CRC mismatch: calc=0x%04X, recv=0x%04X", calcCRC, f.CRC16)
+
+	// 验证XOR
+	calcXOR := f.CalculateXOR()
+	if calcXOR != f.XOR {
+		return fmt.Errorf("XOR mismatch: calc=0x%02X, recv=0x%02X", calcXOR, f.XOR)
 	}
-	
+
 	return nil
 }
 
-// CalculateCRC 计算CRC16校验值
-func (f *Frame) CalculateCRC() uint16 {
-	// 计算从命令码到数据的CRC
-	data := make([]byte, 0, 3+len(f.Data))
-	data = append(data, f.Command)
-	data = append(data, byte(f.Sequence>>8), byte(f.Sequence&0xFF))
-	if len(f.Data) > 0 {
-		data = append(data, f.Data...)
+// CalculateXOR 计算XOR校验值 (v1.2)
+func (f *Frame) CalculateXOR() uint8 {
+	// 计算从帧头到数据结束的XOR（不包括XOR字段和帧尾）
+	var xor uint8 = 0
+
+	// 帧头
+	xor ^= f.Header
+	// 长度
+	xor ^= f.Length
+	// 命令
+	xor ^= f.Command
+	// 序列号（小端序，2字节）
+	xor ^= byte(f.Sequence & 0xFF)
+	xor ^= byte(f.Sequence >> 8)
+	// 数据
+	for _, b := range f.Data {
+		xor ^= b
 	}
-	return CRC16XMODEM(data)
+
+	return xor
 }
 
-// CRC16XMODEM CRC16-XMODEM算法
-func CRC16XMODEM(data []byte) uint16 {
-	crc := uint16(0x0000)
-	for _, b := range data {
-		crc ^= uint16(b) << 8
-		for j := 0; j < 8; j++ {
-			if crc&0x8000 != 0 {
-				crc = (crc << 1) ^ 0x1021
-			} else {
-				crc <<= 1
-			}
-		}
-	}
-	return crc
-}
-
-// FormatTimestamp 格式化时间戳为4字节
+// FormatTimestamp 格式化时间戳为4字节 (v1.2: 小端序)
 func FormatTimestamp(t time.Time) []byte {
 	unix := uint32(t.Unix())
 	buf := make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, unix)
+	binary.LittleEndian.PutUint32(buf, unix)
 	return buf
 }
 
-// ParseTimestamp 解析4字节时间戳
+// ParseTimestamp 解析4字节时间戳 (v1.2: 小端序)
 func ParseTimestamp(data []byte) time.Time {
 	if len(data) < 4 {
 		return time.Time{}
 	}
-	unix := binary.BigEndian.Uint32(data)
+	unix := binary.LittleEndian.Uint32(data)
 	return time.Unix(int64(unix), 0)
 }

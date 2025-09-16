@@ -23,7 +23,7 @@ func (c *STM32Controller) DispenseCoins(count uint16, speed byte) error {
 	}
 	
 	data := make([]byte, 3)
-	binary.BigEndian.PutUint16(data[0:2], count)
+	binary.LittleEndian.PutUint16(data[0:2], count)
 	data[2] = speed
 	
 	err := c.sendCommand(CmdCoinDispense, data)
@@ -54,7 +54,7 @@ func (c *STM32Controller) RefundCoins(count uint16) error {
 	}
 	
 	data := make([]byte, 2)
-	binary.BigEndian.PutUint16(data, count)
+	binary.LittleEndian.PutUint16(data, count)
 	
 	err := c.sendCommand(CmdCoinRefund, data)
 	if err != nil {
@@ -81,7 +81,7 @@ func (c *STM32Controller) DispenseTickets(count uint16) error {
 	}
 	
 	data := make([]byte, 2)
-	binary.BigEndian.PutUint16(data, count)
+	binary.LittleEndian.PutUint16(data, count)
 	
 	err := c.sendCommand(CmdTicketPrint, data)
 	if err != nil {
@@ -259,8 +259,8 @@ func (c *STM32Controller) handleCoinInserted(frame *Frame) {
 	
 	count := frame.Data[0]
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	// 更新统计
 	c.statsMu.Lock()
@@ -294,8 +294,8 @@ func (c *STM32Controller) handleCoinReturned(frame *Frame) {
 		RightCount: frame.Data[2],
 	}
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	// 更新统计
 	c.statsMu.Lock()
@@ -353,8 +353,8 @@ func (c *STM32Controller) handleButtonPressed(frame *Frame) {
 		event.ExtraData = frame.Data[3:]
 	}
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	// 处理游戏按键
 	if event.KeyType == KeyTypeGame && event.Action == KeyActionDown {
@@ -419,10 +419,10 @@ func (c *STM32Controller) handleSensorEvent(frame *Frame) {
 	}
 	
 	sensorType := frame.Data[0]
-	value := binary.BigEndian.Uint16(frame.Data[1:3])
+	value := binary.LittleEndian.Uint16(frame.Data[1:3])
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	// 根据传感器类型处理不同事件
 	switch sensorType {
@@ -613,14 +613,14 @@ func (c *STM32Controller) handleStatusReport(frame *Frame) {
 		ReturnMotor:   frame.Data[1],
 		PushMotor:     frame.Data[2],
 		TicketPrinter: frame.Data[3],
-		CoinCount:     binary.BigEndian.Uint16(frame.Data[4:6]),
-		TicketCount:   binary.BigEndian.Uint16(frame.Data[6:8]),
+		CoinCount:     binary.LittleEndian.Uint16(frame.Data[4:6]),
+		TicketCount:   binary.LittleEndian.Uint16(frame.Data[6:8]),
 		Temperature:   frame.Data[8],
 		ErrorFlags:    frame.Data[9],
 	}
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	c.logger.Info("Status report received",
 		zap.Any("status", status))
@@ -642,8 +642,8 @@ func (c *STM32Controller) handleFaultReport(frame *Frame) {
 		event.ExtraInfo = frame.Data[2:]
 	}
 	
-	// 发送ACK确认
-	c.sendACKResponse(frame.Sequence, frame.Command, StatusSuccess)
+	// 发送Echo确认 (v1.2)
+	c.sendEchoResponse(frame)
 	
 	// 更新统计
 	c.statsMu.Lock()
@@ -682,8 +682,8 @@ func (c *STM32Controller) handleProgress(frame *Frame) {
 	
 	report := &ProgressReport{
 		OriginalCmd: frame.Data[0],
-		Completed:   binary.BigEndian.Uint16(frame.Data[1:3]),
-		Total:       binary.BigEndian.Uint16(frame.Data[3:5]),
+		Completed:   binary.LittleEndian.Uint16(frame.Data[1:3]),
+		Total:       binary.LittleEndian.Uint16(frame.Data[3:5]),
 		Status:      frame.Data[5],
 	}
 	
@@ -702,14 +702,14 @@ func (c *STM32Controller) handleHeartbeat(frame *Frame) {
 	}
 	
 	// timestamp := ParseTimestamp(frame.Data[0:4])
-	// uptime := binary.BigEndian.Uint32(frame.Data[4:8])
+	// uptime := binary.LittleEndian.Uint32(frame.Data[4:8])
 	
 	// 检查是否有版本信息（协议v1.1）
 	if len(frame.Data) >= 9 {
 		stm32Version := frame.Data[8]
-		c.logger.Debug("Heartbeat received", 
+		c.logger.Debug("Heartbeat received",
 			zap.Uint8("stm32_version", stm32Version),
-			zap.Uint8("frame_version", frame.Version))
+			zap.Uint16("frame_version", frame.Version))
 		
 		// 版本协商：如果版本不匹配，可以记录或处理
 		if frame.Version != 0x01 && stm32Version != 0x01 {
@@ -722,22 +722,11 @@ func (c *STM32Controller) handleHeartbeat(frame *Frame) {
 	c.logger.Debug("Heartbeat response received")
 }
 
-// sendACKResponse 发送ACK响应
-func (c *STM32Controller) sendACKResponse(origSeq uint16, origCmd byte, status byte) {
-	data := make([]byte, 4)
-	binary.BigEndian.PutUint16(data[0:2], origSeq)
-	data[2] = origCmd
-	data[3] = status
-	
-	// 使用偶数序列号（STM32上报）
-	seq := origSeq + 1
-	if seq%2 == 1 {
-		seq++
-	}
-	
-	frame := NewFrame(CmdACK, seq, data)
+// sendEchoResponse 发送Echo响应 (v1.2: 原封不动返回表示确认)
+func (c *STM32Controller) sendEchoResponse(frame *Frame) {
+	// v1.2协议：原封不动返回收到的帧作为Echo确认
 	if err := c.writeFrame(frame); err != nil {
-		c.logger.Error("Send ACK failed", zap.Error(err))
+		c.logger.Error("Send Echo failed", zap.Error(err))
 	}
 }
 

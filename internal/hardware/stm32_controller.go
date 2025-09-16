@@ -51,7 +51,7 @@ type STM32Controller struct {
 	// 通道
 	stopCh      chan struct{}
 	eventCh     chan *Frame
-	ackCh       chan *Frame
+	echoCh      chan *Frame  // v1.2: Echo确认通道
 	
 	// 待确认命令
 	pendingCmds map[uint16]*PendingCommand
@@ -126,7 +126,7 @@ func NewSTM32Controller(config *STM32Config, gameLogic GameLogicInterface) *STM3
 		logger:      logger.GetLogger(),
 		stopCh:      make(chan struct{}),
 		eventCh:     make(chan *Frame, 100),
-		ackCh:       make(chan *Frame, 10),
+		echoCh:      make(chan *Frame, 10),  // v1.2: Echo通道
 		pendingCmds: make(map[uint16]*PendingCommand),
 		gameLogic:   gameLogic,
 		lockedResources: make(map[byte]bool),
@@ -230,12 +230,12 @@ func (c *STM32Controller) getNextSeq() uint16 {
 	return uint16(seq)
 }
 
-// sendCommand 发送命令并等待ACK
+// sendCommand 发送命令并等待Echo确认 (v1.2)
 func (c *STM32Controller) sendCommand(cmd byte, data []byte) error {
 	return c.sendCommandWithTimeout(cmd, data, 3*time.Second)
 }
 
-// sendCommandWithTimeout 发送命令并等待ACK（带超时）
+// sendCommandWithTimeout 发送命令并等待Echo（带超时） (v1.2)
 func (c *STM32Controller) sendCommandWithTimeout(cmd byte, data []byte, timeout time.Duration) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("not connected")
@@ -289,12 +289,12 @@ func (c *STM32Controller) sendCommandWithTimeout(cmd byte, data []byte, timeout 
 		return fmt.Errorf("write frame failed: %w", err)
 	}
 	
-	// 等待响应
+	// 等待Echo确认 (v1.2)
 	select {
 	case err := <-respCh:
 		return err
 	case <-time.After(timeout):
-		return fmt.Errorf("wait ACK timeout for cmd 0x%02X seq %d", cmd, seq)
+		return fmt.Errorf("wait Echo timeout for cmd 0x%02X seq %d", cmd, seq)
 	}
 }
 
@@ -444,11 +444,13 @@ func (c *STM32Controller) handleFrame(frame *Frame) {
 		zap.Uint8("cmd", frame.Command),
 		zap.Uint16("seq", frame.Sequence))
 	
+	// v1.2: 检查是否是Echo响应
+	if c.isEchoResponse(frame) {
+		c.handleEcho(frame)
+		return
+	}
+
 	switch frame.Command {
-	case CmdACK:
-		c.handleACK(frame)
-	case CmdNACK:
-		c.handleNACK(frame)
 	case EventCoinInserted:
 		c.handleCoinInserted(frame)
 	case EventCoinReturned:
@@ -470,45 +472,42 @@ func (c *STM32Controller) handleFrame(frame *Frame) {
 	}
 }
 
-// handleACK 处理ACK响应
-func (c *STM32Controller) handleACK(frame *Frame) {
-	if len(frame.Data) < 2 {
-		c.logger.Error("Invalid ACK data length")
-		return
-	}
-	
-	origSeq := binary.BigEndian.Uint16(frame.Data[0:2])
-	// origCmd := frame.Data[2]
-	// status := frame.Data[3]
-	
-	// 查找待确认命令
-	c.cmdMu.Lock()
-	pending, ok := c.pendingCmds[origSeq]
-	c.cmdMu.Unlock()
-	
-	if ok && pending.Response != nil {
-		pending.Response <- nil // 成功
-	}
+// isEchoResponse 检查是否是Echo响应 (v1.2)
+func (c *STM32Controller) isEchoResponse(frame *Frame) bool {
+	c.cmdMu.RLock()
+	_, ok := c.pendingCmds[frame.Sequence]
+	c.cmdMu.RUnlock()
+	return ok
 }
 
-// handleNACK 处理NACK响应
-func (c *STM32Controller) handleNACK(frame *Frame) {
-	if len(frame.Data) < 3 {
-		c.logger.Error("Invalid NACK data length")
-		return
-	}
-	
-	origSeq := binary.BigEndian.Uint16(frame.Data[0:2])
-	origCmd := frame.Data[2]
-	errorCode := frame.Data[3]
-	
+// handleEcho 处理Echo确认 (v1.2)
+func (c *STM32Controller) handleEcho(frame *Frame) {
+	c.logger.Debug("Echo received",
+		zap.Uint8("cmd", frame.Command),
+		zap.Uint16("seq", frame.Sequence))
+
 	// 查找待确认命令
 	c.cmdMu.Lock()
-	pending, ok := c.pendingCmds[origSeq]
+	pending, ok := c.pendingCmds[frame.Sequence]
 	c.cmdMu.Unlock()
-	
-	if ok && pending.Response != nil {
-		pending.Response <- fmt.Errorf("NACK: cmd=0x%02X, error=0x%02X", origCmd, errorCode)
+
+	if !ok {
+		c.logger.Warn("No pending command for echo", zap.Uint16("seq", frame.Sequence))
+		return
+	}
+
+	// 验证命令码是否匹配
+	if pending.Cmd == frame.Command {
+		// Echo确认成功
+		if pending.Response != nil {
+			pending.Response <- nil
+		}
+	} else {
+		// Echo命令码不匹配
+		if pending.Response != nil {
+			pending.Response <- fmt.Errorf("echo command mismatch: expected 0x%02X, got 0x%02X",
+				pending.Cmd, frame.Command)
+		}
 	}
 }
 
