@@ -26,8 +26,8 @@ func TestFrameV12(t *testing.T) {
 			name:    "心跳包",
 			cmd:     CmdHeartbeat,
 			seq:     0x0003,
-			data:    []byte{0x01, 0x02, 0x03, 0x04}, // 时间戳(小端序)
-			wantLen: 11, // 7 + 4
+			data:    []byte{0x01, 0x02, 0x03, 0x04, 0x02, 0x01}, // 时间戳(小端序) + 版本号v1.2(小端序)
+			wantLen: 13, // 7 + 6
 		},
 		{
 			name:    "最小帧",
@@ -197,6 +197,45 @@ func TestLittleEndianConversion(t *testing.T) {
 					tt.want, got, tt.value)
 			}
 		})
+	}
+}
+
+// TestHeartbeatV12 测试v1.2心跳包格式
+func TestHeartbeatV12(t *testing.T) {
+	// 测试心跳请求格式
+	frame := NewFrame(CmdHeartbeat, 0x0001, nil)
+	// 心跳数据：时间戳4字节 + 版本2字节
+	heartbeatData := make([]byte, 6)
+	heartbeatData[0] = 0x01 // 时间戳
+	heartbeatData[1] = 0x02
+	heartbeatData[2] = 0x03
+	heartbeatData[3] = 0x04
+	binary.LittleEndian.PutUint16(heartbeatData[4:6], 0x0102) // v1.2版本号
+
+	frame.Data = heartbeatData
+	frame.Length = uint8(7 + len(heartbeatData)) // 7字节基础 + 6字节数据
+
+	// 验证版本号编码
+	if heartbeatData[4] != 0x02 || heartbeatData[5] != 0x01 {
+		t.Errorf("Version encoding error: got [%02X %02X], want [0x02 0x01]",
+			heartbeatData[4], heartbeatData[5])
+	}
+
+	// 验证帧长度
+	if frame.Length != 13 {
+		t.Errorf("Heartbeat frame length = %d, want 13", frame.Length)
+	}
+
+	// 测试心跳响应格式（时间戳4 + 运行时间4 + 版本2）
+	responseData := make([]byte, 10)
+	copy(responseData[0:4], heartbeatData[0:4]) // 时间戳
+	binary.LittleEndian.PutUint32(responseData[4:8], 12345) // 运行时间
+	binary.LittleEndian.PutUint16(responseData[8:10], 0x0102) // 版本号
+
+	// 验证响应版本号
+	gotVersion := binary.LittleEndian.Uint16(responseData[8:10])
+	if gotVersion != 0x0102 {
+		t.Errorf("Response version = 0x%04X, want 0x0102", gotVersion)
 	}
 }
 

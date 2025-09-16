@@ -232,19 +232,23 @@ func (c *STM32Controller) RecoverFault(faultCode byte, action byte, param byte) 
 
 // ============= 系统指令（0x31） =============
 
-// SendHeartbeat 发送心跳
+// SendHeartbeat 发送心跳 (v1.2)
 func (c *STM32Controller) SendHeartbeat() error {
-	// 构建心跳数据（包含版本号）
-	data := make([]byte, 5)
+	// 构建心跳数据（时间戳4字节 + 版本2字节）
+	data := make([]byte, 6)
+
+	// 时间戳（小端序）
 	copy(data[0:4], FormatTimestamp(time.Now()))
-	data[4] = 0x01 // 协议版本号 v1.1
-	
+
+	// 版本号 v1.2 = 0x0102（小端序）
+	binary.LittleEndian.PutUint16(data[4:6], 0x0102)
+
 	err := c.sendCommandWithTimeout(CmdHeartbeat, data, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("heartbeat failed: %w", err)
 	}
-	
-	c.logger.Debug("Heartbeat sent", zap.Uint8("version", data[4]))
+
+	c.logger.Debug("Heartbeat sent", zap.Uint16("version", 0x0102))
 	return nil
 }
 
@@ -694,31 +698,32 @@ func (c *STM32Controller) handleProgress(frame *Frame) {
 		zap.Uint8("status", report.Status))
 }
 
-// handleHeartbeat 处理心跳响应
+// handleHeartbeat 处理心跳响应 (v1.2)
 func (c *STM32Controller) handleHeartbeat(frame *Frame) {
-	if len(frame.Data) < 8 {
+	if len(frame.Data) < 10 { // 时间戳4 + 运行时间4 + 版本2
 		c.logger.Error("Invalid heartbeat response")
 		return
 	}
-	
+
+	// 解析数据
 	// timestamp := ParseTimestamp(frame.Data[0:4])
 	// uptime := binary.LittleEndian.Uint32(frame.Data[4:8])
-	
-	// 检查是否有版本信息（协议v1.1）
-	if len(frame.Data) >= 9 {
-		stm32Version := frame.Data[8]
+
+	// 解析版本信息（v1.2: 2字节小端序）
+	if len(frame.Data) >= 10 {
+		stm32Version := binary.LittleEndian.Uint16(frame.Data[8:10])
 		c.logger.Debug("Heartbeat received",
-			zap.Uint8("stm32_version", stm32Version),
-			zap.Uint16("frame_version", frame.Version))
-		
-		// 版本协商：如果版本不匹配，可以记录或处理
-		if frame.Version != 0x01 && stm32Version != 0x01 {
+			zap.Uint16("stm32_version", stm32Version))
+
+		// 版本协商
+		expectedVersion := uint16(0x0102) // v1.2
+		if stm32Version != expectedVersion {
 			c.logger.Warn("Protocol version mismatch",
-				zap.Uint8("expected", 0x01),
-				zap.Uint8("received", stm32Version))
+				zap.Uint16("expected", expectedVersion),
+				zap.Uint16("received", stm32Version))
 		}
 	}
-	
+
 	c.logger.Debug("Heartbeat response received")
 }
 
