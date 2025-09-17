@@ -2,11 +2,9 @@ package animal
 
 import (
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/wfunc/slot-game/internal/pb"
-	"google.golang.org/protobuf/proto"
 )
 
 // RoomMessage 房间消息
@@ -15,89 +13,10 @@ type RoomMessage struct {
 	Payload interface{}
 }
 
-// spawnAnimal 生成动物（内部方法）
-func (r *Room) spawnAnimal(animalType pb.EAnimal, rnd *rand.Rand) {
-	if rnd == nil {
-		rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
-	}
 
-	// 随机选择路线
-	lineID := uint32(rnd.Intn(3) + 1)
 
-	route := &AnimalRoute{
-		ID:      r.nextAnimalID,
-		Animal:  animalType,
-		LineID:  lineID,
-		Point:   0,
-		Red:     rnd.Float32() < 0.1, // 10%概率有红包
-		State:   pb.EAnimalState_normal,
-		SpawnAt: time.Now(),
-	}
 
-	r.animals[route.ID] = route
-	r.nextAnimalID++
-}
 
-// routesProto 转换为protobuf格式
-func (r *Room) routesProto() []*pb.PRoute {
-	routes := make([]*pb.PRoute, 0, len(r.animals))
-	for _, animal := range r.animals {
-		routes = append(routes, &pb.PRoute{
-			Id:       proto.Uint32(animal.ID),
-			Bet:      animal.Animal.Enum(),
-			LineId:   proto.Uint32(animal.LineID),
-			Point:    proto.Uint32(animal.Point),
-			RedState: proto.Bool(animal.Red),
-			Status:   animal.State.Enum(),
-		})
-	}
-	return routes
-}
-
-// playersProto 获取房间内所有玩家信息
-func (r *Room) playersProto() []*pb.PAnimalPlayer {
-	players := make([]*pb.PAnimalPlayer, 0, len(r.players))
-	for _, session := range r.players {
-		players = append(players, &pb.PAnimalPlayer{
-			RoleId: proto.Uint32(session.Player.ID),
-			Icon:   proto.String(session.Player.Icon),
-			Name:   proto.String(session.Player.Name),
-		})
-	}
-	return players
-}
-
-// otherPlayerIDs 获取除指定玩家外的其他玩家ID
-func (r *Room) otherPlayerIDs(excludeID uint32) []uint32 {
-	ids := make([]uint32, 0, len(r.players)-1)
-	for id := range r.players {
-		if id != excludeID {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-// nextSkillExpiry 获取下一个技能过期时间
-func (r *Room) nextSkillExpiry(skillEnds map[pb.EAnimalSkillType]time.Time) uint32 {
-	now := time.Now()
-	minDuration := time.Hour
-
-	for _, endTime := range skillEnds {
-		if endTime.After(now) {
-			duration := endTime.Sub(now)
-			if duration < minDuration {
-				minDuration = duration
-			}
-		}
-	}
-
-	if minDuration < time.Hour {
-		return uint32(minDuration.Seconds())
-	}
-
-	return 0
-}
 
 // UpdateAnimals 更新动物位置和状态
 func (r *Room) UpdateAnimals(deltaTime float32) (removedAnimals []uint32) {
@@ -106,7 +25,7 @@ func (r *Room) UpdateAnimals(deltaTime float32) (removedAnimals []uint32) {
 
 	for id, animal := range r.animals {
 		// 更新位置（简化实现）
-		if animal.State == pb.EAnimalState_normal {
+		if animal.State == pb.EAnimalState_state_normal {
 			// 每秒移动10个点
 			animal.Point += uint32(10 * deltaTime)
 
@@ -117,10 +36,10 @@ func (r *Room) UpdateAnimals(deltaTime float32) (removedAnimals []uint32) {
 		}
 
 		// 解冻检查
-		if animal.State == pb.EAnimalState_ice {
+		if animal.State == pb.EAnimalState_state_ice {
 			// 冰冻5秒后解冻
 			if now.Sub(animal.SpawnAt).Seconds() > 5 {
-				animal.State = pb.EAnimalState_normal
+				animal.State = pb.EAnimalState_state_normal
 			}
 		}
 	}

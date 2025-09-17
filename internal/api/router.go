@@ -186,9 +186,9 @@ func (r *Router) setupRoutes() {
 	ws := r.engine.Group("/ws")
 	// WebSocket使用JWT认证，但不需要通过中间件
 	{
-		ws.GET("/game", r.authMiddleware.OptionalAuth(), r.wsHandler.GameWebSocket)
+		ws.GET("/game", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的游戏（支持slot和animal）
 		ws.GET("/online", r.wsHandler.GetOnlineCount)
-		ws.GET("/slot", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的老虎机游戏
+		ws.GET("/slot", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的老虎机游戏（保持兼容）
 	}
 
 	// 静态文件服务

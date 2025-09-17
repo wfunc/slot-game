@@ -54,6 +54,9 @@ func AutoMigrate() error {
 		&models.ErrorLog{},
 		&models.DeviceStatus{},
 		&models.SystemConfig{},
+
+		// 串口日志相关
+		&models.SerialLog{},
 	}
 
 	// 执行迁移
@@ -115,6 +118,27 @@ func createIndexes() error {
 	
 	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at)").Error; err != nil {
 		logger.Warn("创建索引失败", zap.String("index", "idx_transactions_created_at"), zap.Error(err))
+	}
+
+	// 串口日志表索引
+	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_serial_logs_device_type ON serial_logs(device_type)").Error; err != nil {
+		logger.Warn("创建索引失败", zap.String("index", "idx_serial_logs_device_type"), zap.Error(err))
+	}
+
+	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_serial_logs_direction ON serial_logs(direction)").Error; err != nil {
+		logger.Warn("创建索引失败", zap.String("index", "idx_serial_logs_direction"), zap.Error(err))
+	}
+
+	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_serial_logs_function ON serial_logs(function)").Error; err != nil {
+		logger.Warn("创建索引失败", zap.String("index", "idx_serial_logs_function"), zap.Error(err))
+	}
+
+	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_serial_logs_request_id ON serial_logs(request_id)").Error; err != nil {
+		logger.Warn("创建索引失败", zap.String("index", "idx_serial_logs_request_id"), zap.Error(err))
+	}
+
+	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_serial_logs_created_at ON serial_logs(created_at)").Error; err != nil {
+		logger.Warn("创建索引失败", zap.String("index", "idx_serial_logs_created_at"), zap.Error(err))
 	}
 
 	logger.Info("数据库索引创建完成")

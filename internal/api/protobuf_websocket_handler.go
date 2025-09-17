@@ -14,17 +14,19 @@ import (
 
 // ProtobufWebSocketHandler 处理protobuf格式的WebSocket连接
 type ProtobufWebSocketHandler struct {
-	slotHandler   *ws.SlotHandler
-	animalHandler *ws.AnimalHandler
-	upgrader      websocket.Upgrader
-	logger        *zap.Logger
+	slotHandler     *ws.SlotHandler
+	animalHandler   *ws.AnimalHandler
+	// unifiedHandler  *ws.UnifiedHandler // 统一处理器 (暂时注释，等待完善)
+	upgrader        websocket.Upgrader
+	logger          *zap.Logger
 }
 
 // NewProtobufWebSocketHandler 创建protobuf WebSocket处理器
 func NewProtobufWebSocketHandler(db *gorm.DB, logger *zap.Logger) *ProtobufWebSocketHandler {
 	return &ProtobufWebSocketHandler{
-		slotHandler:   ws.NewSlotHandler(db),
-		animalHandler: ws.NewAnimalHandler(db, logger),
+		slotHandler:     ws.NewSlotHandler(db),
+		animalHandler:   ws.NewAnimalHandler(db, logger),
+		// unifiedHandler:  ws.NewUnifiedHandler(db, logger), // 创建统一处理器 (暂时注释)
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -59,6 +61,39 @@ func (h *ProtobufWebSocketHandler) HandleProtobufConnection(c *gin.Context) {
 		return
 	}
 
+	// 使用统一处理器处理所有游戏 (暂时注释，等待完善)
+	// if game == "unified" || game == "all" {
+	// 	// 解析初始化参数
+	// 	userID := uint(0)
+	// 	playerID := uint32(0)
+	// 	name := c.Query("name")
+	// 	icon := c.Query("icon")
+	// 	vip := uint32(0)
+
+	// 	if userIDStr := c.Query("user_id"); userIDStr != "" {
+	// 		if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
+	// 			userID = uint(id)
+	// 		}
+	// 	}
+
+	// 	if playerIDStr := c.Query("player_id"); playerIDStr != "" {
+	// 		if id, err := strconv.ParseUint(playerIDStr, 10, 32); err == nil {
+	// 			playerID = uint32(id)
+	// 		}
+	// 	}
+
+	// 	if vipStr := c.Query("vip"); vipStr != "" {
+	// 		if v, err := strconv.ParseUint(vipStr, 10, 32); err == nil {
+	// 			vip = uint32(v)
+	// 		}
+	// 	}
+
+	// 	// 使用统一处理器
+	// 	h.unifiedHandler.HandleConnection(conn, userID, playerID, name, icon, vip)
+	// 	return
+	// }
+
+	// 兼容旧的单独游戏模式
 	if game == "animal" {
 		opts := parseAnimalInitOptions(c)
 		h.animalHandler.HandleConnection(conn, opts)

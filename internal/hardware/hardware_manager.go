@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wfunc/slot-game/internal/database"
 	"github.com/wfunc/slot-game/internal/logger"
+	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -18,9 +20,10 @@ type HardwareManager struct {
 	logger *zap.Logger
 
 	// 核心组件
-	controller    HardwareController // 硬件控制器接口（STM32）
-	acmController *ACMController     // ACM算法控制器
-	gameLogic     *GameLogicAdapter  // 游戏逻辑适配器
+	controller       HardwareController       // 硬件控制器接口（STM32）
+	acmController    *ACMController           // ACM算法控制器
+	gameLogic        *GameLogicAdapter        // 游戏逻辑适配器
+	serialLogService *service.SerialLogService // 串口日志服务
 
 	// 运行状态
 	ctx     context.Context
@@ -146,6 +149,14 @@ func (m *HardwareManager) Initialize() error {
 		m.onBalanceChange,
 	)
 
+	// 创建串口日志服务（如果数据库已连接）
+	if database.IsConnected() {
+		m.serialLogService = service.NewSerialLogService(database.GetDB())
+		m.logger.Info("串口日志服务已初始化")
+	} else {
+		m.logger.Warn("数据库未连接，串口日志服务未启用")
+	}
+
 	// 根据配置选择控制器
 	if m.config.MockMode {
 		m.logger.Info("使用模拟控制器")
@@ -167,6 +178,12 @@ func (m *HardwareManager) Initialize() error {
 
 	// 创建STM32控制器
 	m.controller = NewSTM32Controller(stm32Config, m.gameLogic)
+	// 设置串口日志服务（暂时注释掉，方法不存在）
+	// if m.serialLogService != nil {
+	// 	if stm32, ok := m.controller.(*STM32Controller); ok {
+	// 		stm32.SetSerialLogService(m.serialLogService)
+	// 	}
+	// }
 
 	// 初始化ACM控制器（如果启用）
 	if m.config.ACMEnabled {
@@ -179,6 +196,10 @@ func (m *HardwareManager) Initialize() error {
 		}
 
 		m.acmController = NewACMController(acmConfig)
+		// 设置串口日志服务
+		if m.serialLogService != nil {
+			m.acmController.SetSerialLogService(m.serialLogService)
+		}
 
 		// 设置STM32控制器引用（用于桥接）
 		if stm32, ok := m.controller.(*STM32Controller); ok {

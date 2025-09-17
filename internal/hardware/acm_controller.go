@@ -13,6 +13,7 @@ import (
 
 	"github.com/tarm/serial"
 	"github.com/wfunc/slot-game/internal/logger"
+	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +57,9 @@ type ACMController struct {
 	// Algo定时器
 	algoTimer       *time.Ticker
 	algoTimerStopCh chan struct{}
+
+	// 串口日志服务
+	serialLogService *service.SerialLogService
 }
 
 // ACMMessage ACM消息格式
@@ -86,6 +90,11 @@ func NewACMController(config *ACMConfig) *ACMController {
 // SetSTM32Controller 设置STM32控制器引用（用于桥接）
 func (c *ACMController) SetSTM32Controller(stm32 *STM32Controller) {
 	c.stm32Controller = stm32
+}
+
+// SetSerialLogService 设置串口日志服务
+func (c *ACMController) SetSerialLogService(service *service.SerialLogService) {
+	c.serialLogService = service
 }
 
 // Connect 连接ACM设备

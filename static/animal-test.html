@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 疯狂动物园 WebSocket 测试工具 - 完整协议测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+
+        .status-indicator.connected {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+
+        .control-section {
+            margin-bottom: 25px;
+        }
+
+        .control-section h3 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .input-group input,
+        .input-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .input-group input:focus,
+        .input-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .quick-btn {
+            padding: 8px;
+            font-size: 12px;
+        }
+
+        .message-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #666;
+            font-weight: bold;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            height: calc(100vh - 320px);
+            overflow-y: auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .message {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .message.sent {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-left: 4px solid #2196f3;
+        }
+
+        .message.received {
+            background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%);
+            border-left: 4px solid #8bc34a;
+        }
+
+        .message.push {
+            background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+            border-left: 4px solid #ff9800;
+        }
+
+        .message.error {
+            background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+            border-left: 4px solid #f44336;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .message-type {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .message-time {
+            color: #999;
+            font-size: 11px;
+        }
+
+        .message-content {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .proto-fields {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.5);
+            border-radius: 5px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+        }
+
+        .proto-field {
+            margin: 5px 0;
+            padding-left: 10px;
+        }
+
+        .field-name {
+            color: #2196f3;
+            font-weight: bold;
+        }
+
+        .field-value {
+            color: #4caf50;
+        }
+
+        .field-type {
+            color: #999;
+            font-size: 10px;
+        }
+
+        .game-state {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .game-state h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .state-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .state-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .state-label {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .state-value {
+            color: #333;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .animal-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .animal-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px;
+            margin-bottom: 5px;
+            background: #f5f5f5;
+            border-radius: 3px;
+        }
+
+        .animal-name {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .animal-info {
+            color: #666;
+            font-size: 11px;
+        }
+
+        .skill-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .skill-item {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .skill-item:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .skill-item.active {
+            background: #4caf50;
+            color: white;
+        }
+
+        .skill-count {
+            font-size: 10px;
+            margin-top: 3px;
+        }
+
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .debug-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+
+        .debug-toggle {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .debug-content {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .hex-dump {
+            word-break: break-all;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🦁 疯狂动物园 WebSocket 测试工具 🐘</h1>
+            <div class="status-bar">
+                <div class="status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">未连接</span>
+                </div>
+                <div id="connectionInfo">
+                    <span id="connectionTime"></span>
+                    <span id="roomInfo" style="margin-left: 20px;"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="control-panel">
+                <!-- 连接控制 -->
+                <div class="control-section">
+                    <h3>🔌 连接设置</h3>
+                    <div class="input-group">
+                        <label>WebSocket URL</label>
+                        <input type="text" id="wsUrl" value="ws://localhost:8080/ws/game?game=animal" placeholder="ws://localhost:8080/ws/game?game=animal">
+                    </div>
+                    <button id="connectBtn" class="btn btn-primary" onclick="connect()">连接服务器</button>
+                    <button id="disconnectBtn" class="btn btn-danger" onclick="disconnect()" disabled>断开连接</button>
+                </div>
+
+                <!-- 房间控制 -->
+                <div class="control-section">
+                    <h3>🏠 房间管理</h3>
+                    <div class="input-group">
+                        <label>场次类型</label>
+                        <select id="zooType">
+                            <option value="1">平民场</option>
+                            <option value="2">小资场</option>
+                            <option value="3">富豪场</option>
+                            <option value="4">黄金场</option>
+                            <option value="5">钻石场</option>
+                            <option value="6">单人场</option>
+                            <option value="7">体验场</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-success" onclick="sendEnterRoom()">进入房间 (1801)</button>
+                    <button class="btn btn-warning" onclick="sendLeaveRoom()">离开房间 (1802)</button>
+                    <button class="btn btn-info" onclick="sendGetZooInfo()">获取场次信息 (1807)</button>
+                </div>
+
+                <!-- 射击控制 -->
+                <div class="control-section">
+                    <h3>🎯 射击控制</h3>
+                    <div class="input-group">
+                        <label>下注金额</label>
+                        <select id="betAmount">
+                            <option value="10">10</option>
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>目标动物ID</label>
+                        <input type="number" id="targetAnimalId" value="1" min="1">
+                    </div>
+                    <button class="btn btn-danger" onclick="sendFireBullet()">发射子弹 (1815)</button>
+                    <button class="btn btn-warning" onclick="sendBet()">下注打击 (1803)</button>
+                </div>
+
+                <!-- 技能控制 -->
+                <div class="control-section">
+                    <h3>⚡ 技能系统</h3>
+                    <div class="skill-container">
+                        <div class="skill-item" onclick="useSkill(1)">
+                            ❄️ 冰冻
+                            <div class="skill-count" id="skill_1">0</div>
+                        </div>
+                        <div class="skill-item" onclick="useSkill(2)">
+                            🎯 锁定
+                            <div class="skill-count" id="skill_2">0</div>
+                        </div>
+                        <div class="skill-item" onclick="useSkill(3)">
+                            ✨ 倍率
+                            <div class="skill-count" id="skill_3">0</div>
+                        </div>
+                    </div>
+                    <div class="quick-actions" style="margin-top: 10px;">
+                        <button class="btn quick-btn btn-info" onclick="sendBuySkill(1)">购买冰冻</button>
+                        <button class="btn quick-btn btn-info" onclick="sendBuySkill(2)">购买锁定</button>
+                        <button class="btn quick-btn btn-info" onclick="sendBuySkill(3)">购买倍率</button>
+                        <button class="btn quick-btn btn-info" onclick="sendGetToolsPrice()">查询价格</button>
+                    </div>
+                </div>
+
+                <!-- 数据查询 -->
+                <div class="control-section">
+                    <h3>📊 数据查询</h3>
+                    <button class="btn btn-info" onclick="sendGetRecord()">游戏记录 (1804)</button>
+                    <button class="btn btn-info" onclick="sendGetReward()">大奖记录 (1805)</button>
+                    <button class="btn btn-info" onclick="sendGetCJLog()">彩金记录 (1812)</button>
+                </div>
+
+                <!-- 快速测试 -->
+                <div class="control-section">
+                    <h3>🚀 快速测试</h3>
+                    <div class="quick-actions">
+                        <button class="btn quick-btn btn-success" onclick="quickTest('enter')">进房测试</button>
+                        <button class="btn quick-btn btn-success" onclick="quickTest('shoot')">射击测试</button>
+                        <button class="btn quick-btn btn-success" onclick="quickTest('skill')">技能测试</button>
+                        <button class="btn quick-btn btn-success" onclick="quickTest('full')">完整流程</button>
+                    </div>
+                </div>
+
+                <!-- 游戏状态 -->
+                <div class="game-state">
+                    <h4>🎮 游戏状态</h4>
+                    <div class="state-grid">
+                        <div class="state-item">
+                            <span class="state-label">金币:</span>
+                            <span class="state-value" id="playerBalance">0</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-label">体验币:</span>
+                            <span class="state-value" id="freeGold">0</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-label">累计赢取:</span>
+                            <span class="state-value" id="totalWin">0</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-label">彩金池:</span>
+                            <span class="state-value" id="jackpot">0</span>
+                        </div>
+                    </div>
+                    <div class="animal-list" id="animalList">
+                        <div style="text-align: center; color: #999;">暂无动物</div>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="stats-container">
+                    <div class="stat-box">
+                        <div class="stat-value" id="sentCount">0</div>
+                        <div class="stat-label">发送</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="receivedCount">0</div>
+                        <div class="stat-label">接收</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="pushCount">0</div>
+                        <div class="stat-label">推送</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="errorCount">0</div>
+                        <div class="stat-label">错误</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="message-panel">
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('all')">全部消息</button>
+                    <button class="tab" onclick="switchTab('sent')">发送消息</button>
+                    <button class="tab" onclick="switchTab('received')">接收响应</button>
+                    <button class="tab" onclick="switchTab('push')">推送消息</button>
+                    <button class="tab" onclick="switchTab('debug')">调试信息</button>
+                </div>
+
+                <div class="tab-content active" id="tab-all"></div>
+                <div class="tab-content" id="tab-sent"></div>
+                <div class="tab-content" id="tab-received"></div>
+                <div class="tab-content" id="tab-push"></div>
+                <div class="tab-content" id="tab-debug"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket连接
+        let ws = null;
+        let connectionStartTime = null;
+
+        // 统计计数
+        let sentCount = 0;
+        let receivedCount = 0;
+        let pushCount = 0;
+        let errorCount = 0;
+
+        // 游戏状态
+        let gameState = {
+            roomType: 0,
+            animals: new Map(),
+            players: new Map(),
+            skills: new Map(),
+            balance: 0,
+            freeGold: 0,
+            totalWin: 0,
+            jackpot: 0,
+            betValues: []
+        };
+
+        // 消息类型映射
+        const MESSAGE_TYPES = {
+            // 客户端请求
+            1801: '进入房间',
+            1802: '离开房间',
+            1803: '下注打击',
+            1804: '查看记录',
+            1805: '查看大奖',
+            1806: '使用技能',
+            1807: '获取场次',
+            1808: '购买道具',
+            1809: '获取价格',
+            1812: '彩金记录',
+            1815: '发射子弹',
+
+            // 活动场
+            1871: '进入活动',
+            1872: '打活动动物',
+            1873: '获取排行',
+            1879: '观战视角',
+
+            // 服务器推送
+            1810: '推送彩金',
+            1811: '彩金中奖',
+            1813: '一击必杀',
+            1814: '清除必杀',
+            1882: '使用技能',
+            1883: '动物预告',
+            1884: '动物死亡',
+            1885: '玩家离开',
+            1886: '玩家进入',
+            1887: '动物进入',
+            1888: '动物离开',
+            1889: '活动广播',
+            1899: '打击动物',
+
+            // 活动推送
+            1874: '活动动物离开',
+            1875: '活动结束',
+            1876: '活动动物进入',
+            1877: '活动动物死亡',
+            1878: '活动状态',
+            1880: '活动排行',
+            1881: '活动点击'
+        };
+
+        // 动物类型映射
+        const ANIMAL_TYPES = {
+            0: '金豆',
+            1: '乌龟',
+            2: '公鸡',
+            3: '斗牛犬',
+            4: '金丝猴',
+            5: '矮马',
+            6: '奶牛',
+            7: '熊猫',
+            8: '河马',
+            9: '狮子',
+            10: '大象',
+            11: '皮卡丘',
+            12: '炸弹人',
+            13: '老虎',
+            14: '羊驼',
+            15: '熊',
+            16: '兔子',
+            17: '驴',
+            18: '豹子',
+            19: '猪',
+            20: '河马'
+        };
+
+        // 技能类型映射
+        const SKILL_TYPES = {
+            1: '冰冻技能',
+            2: '锁定目标',
+            3: '倍率提升'
+        };
+
+        // 场次类型映射
+        const ZOO_TYPES = {
+            1: '平民场',
+            2: '小资场',
+            3: '富豪场',
+            4: '黄金场',
+            5: '钻石场',
+            6: '单人场',
+            7: '体验场'
+        };
+
+        // Protobuf编解码
+        class ProtobufCodec {
+            static encodeVarint(value) {
+                const bytes = [];
+                while (value > 0x7f) {
+                    bytes.push((value & 0x7f) | 0x80);
+                    value >>>= 7;
+                }
+                bytes.push(value & 0x7f);
+                return bytes;
+            }
+
+            static decodeVarint(bytes, offset = 0) {
+                let value = 0;
+                let shift = 0;
+                while (offset < bytes.length) {
+                    const byte = bytes[offset++];
+                    value |= (byte & 0x7f) << shift;
+                    if ((byte & 0x80) === 0) {
+                        return { value, offset };
+                    }
+                    shift += 7;
+                }
+                throw new Error('Varint too long');
+            }
+
+            static encodeMessage(msgId, fields = {}) {
+                const data = [];
+
+                // 编码字段
+                for (const [fieldNum, value] of Object.entries(fields)) {
+                    const tag = (parseInt(fieldNum) << 3) | 0; // VARINT类型
+                    data.push(...this.encodeVarint(tag));
+
+                    if (typeof value === 'number') {
+                        data.push(...this.encodeVarint(value));
+                    } else if (typeof value === 'string') {
+                        const strBytes = new TextEncoder().encode(value);
+                        const lenTag = (parseInt(fieldNum) << 3) | 2; // LENGTH_DELIMITED
+                        data.push(lenTag);
+                        data.push(...this.encodeVarint(strBytes.length));
+                        data.push(...strBytes);
+                    } else if (value instanceof Uint8Array) {
+                        const lenTag = (parseInt(fieldNum) << 3) | 2;
+                        data.push(lenTag);
+                        data.push(...this.encodeVarint(value.length));
+                        data.push(...value);
+                    }
+                }
+
+                // 构建完整消息
+                const protoData = new Uint8Array(data);
+                const totalLength = 2 + protoData.length;
+                const buffer = new ArrayBuffer(4 + totalLength);
+                const view = new DataView(buffer);
+                const bytes = new Uint8Array(buffer);
+
+                view.setUint32(0, totalLength, false); // 长度
+                view.setUint16(4, msgId, false); // 消息ID
+                bytes.set(protoData, 6);
+
+                return buffer;
+            }
+
+            static decodeMessage(buffer) {
+                const bytes = new Uint8Array(buffer);
+                const view = new DataView(buffer);
+
+                if (bytes.length < 6) {
+                    return { msgId: 0, fields: {}, error: '消息太短' };
+                }
+
+                const length = view.getUint32(0, false);
+                const msgId = view.getUint16(4, false);
+                const dataBytes = bytes.slice(6);
+
+                // 解析字段
+                const fields = {};
+                let offset = 0;
+
+                while (offset < dataBytes.length) {
+                    const tagResult = this.decodeVarint(dataBytes, offset);
+                    if (!tagResult) break;
+
+                    const tag = tagResult.value;
+                    offset = tagResult.offset;
+
+                    const fieldNum = tag >>> 3;
+                    const wireType = tag & 7;
+
+                    if (wireType === 0) { // VARINT
+                        const result = this.decodeVarint(dataBytes, offset);
+                        fields[fieldNum] = result.value;
+                        offset = result.offset;
+                    } else if (wireType === 2) { // LENGTH_DELIMITED
+                        const lenResult = this.decodeVarint(dataBytes, offset);
+                        const len = lenResult.value;
+                        offset = lenResult.offset;
+
+                        const data = dataBytes.slice(offset, offset + len);
+                        fields[fieldNum] = data;
+                        offset += len;
+                    }
+                }
+
+                return { msgId, fields, length };
+            }
+        }
+
+        // 连接WebSocket
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+
+            if (!url) {
+                showError('请输入WebSocket URL');
+                return;
+            }
+
+            try {
+                ws = new WebSocket(url);
+                ws.binaryType = 'arraybuffer';
+
+                ws.onopen = () => {
+                    connectionStartTime = Date.now();
+                    updateStatus(true);
+                    addMessage('all', '✅ 连接成功', 'received');
+                };
+
+                ws.onmessage = (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        handleMessage(event.data);
+                    }
+                };
+
+                ws.onerror = (event) => {
+                    errorCount++;
+                    updateStats();
+                    addMessage('all', '❌ 连接错误', 'error');
+                };
+
+                ws.onclose = (event) => {
+                    connectionStartTime = null;
+                    updateStatus(false);
+                    addMessage('all', `⚠️ 连接关闭 (${event.code})`, 'error');
+                };
+
+            } catch (error) {
+                showError('连接失败: ' + error.message);
+            }
+        }
+
+        // 断开连接
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        // 发送消息
+        function sendMessage(msgId, fields = {}) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showError('WebSocket未连接');
+                return;
+            }
+
+            const buffer = ProtobufCodec.encodeMessage(msgId, fields);
+            ws.send(buffer);
+
+            sentCount++;
+            updateStats();
+
+            const msgName = MESSAGE_TYPES[msgId] || `消息${msgId}`;
+            addMessage('sent', `📤 [${msgId}] ${msgName}`, 'sent', fields);
+        }
+
+        // 处理接收的消息
+        function handleMessage(buffer) {
+            const decoded = ProtobufCodec.decodeMessage(buffer);
+            const msgName = MESSAGE_TYPES[decoded.msgId] || `消息${decoded.msgId}`;
+
+            // 判断是推送还是响应
+            const isPush = decoded.msgId >= 1810 && decoded.msgId !== 1812;
+
+            if (isPush) {
+                pushCount++;
+                addMessage('push', `📥 [${decoded.msgId}] ${msgName}`, 'push', decoded.fields);
+                handlePushMessage(decoded.msgId, decoded.fields);
+            } else {
+                receivedCount++;
+                addMessage('received', `📥 [${decoded.msgId}] ${msgName}`, 'received', decoded.fields);
+                handleResponse(decoded.msgId, decoded.fields);
+            }
+
+            updateStats();
+        }
+
+        // 处理响应消息
+        function handleResponse(msgId, fields) {
+            switch(msgId) {
+                case 1801: // 进入房间响应
+                    handleEnterRoomResponse(fields);
+                    break;
+                case 1802: // 离开房间响应
+                    handleLeaveRoomResponse(fields);
+                    break;
+                case 1803: // 下注响应
+                    handleBetResponse(fields);
+                    break;
+                case 1806: // 使用技能响应
+                    handleUseSkillResponse(fields);
+                    break;
+                case 1815: // 发射子弹响应
+                    handleFireBulletResponse(fields);
+                    break;
+            }
+        }
+
+        // 处理推送消息
+        function handlePushMessage(msgId, fields) {
+            switch(msgId) {
+                case 1887: // 动物进入
+                    handleAnimalEnter(fields);
+                    break;
+                case 1888: // 动物离开
+                    handleAnimalLeave(fields);
+                    break;
+                case 1884: // 动物死亡
+                    handleAnimalDie(fields);
+                    break;
+                case 1810: // 推送彩金
+                    handleJackpot(fields);
+                    break;
+            }
+        }
+
+        // 处理进入房间响应
+        function handleEnterRoomResponse(fields) {
+            // 更新游戏状态
+            if (fields[1]) { // bet_val
+                gameState.betValues = Array.isArray(fields[1]) ? fields[1] : [fields[1]];
+            }
+            if (fields[9]) { // free_gold
+                gameState.freeGold = fields[9];
+                document.getElementById('freeGold').textContent = fields[9];
+            }
+            if (fields[10]) { // 彩金
+                const cj = new TextDecoder().decode(fields[10]);
+                gameState.jackpot = cj;
+                document.getElementById('jackpot').textContent = cj;
+            }
+
+            updateRoomInfo();
+        }
+
+        // 处理离开房间响应
+        function handleLeaveRoomResponse(fields) {
+            if (fields[1]) { // total_win
+                gameState.totalWin = fields[1];
+                document.getElementById('totalWin').textContent = fields[1];
+            }
+
+            // 清空动物列表
+            gameState.animals.clear();
+            updateAnimalList();
+        }
+
+        // 处理下注响应
+        function handleBetResponse(fields) {
+            if (fields[1]) { // balance
+                gameState.balance = fields[1];
+                document.getElementById('playerBalance').textContent = fields[1];
+            }
+            if (fields[6]) { // total_win
+                gameState.totalWin = fields[6];
+                document.getElementById('totalWin').textContent = fields[6];
+            }
+        }
+
+        // 处理发射子弹响应
+        function handleFireBulletResponse(fields) {
+            if (fields[2]) { // balance
+                gameState.balance = fields[2];
+                document.getElementById('playerBalance').textContent = fields[2];
+            }
+        }
+
+        // 处理使用技能响应
+        function handleUseSkillResponse(fields) {
+            // 更新技能显示
+            updateSkillDisplay();
+        }
+
+        // 处理动物进入
+        function handleAnimalEnter(fields) {
+            if (fields[1]) { // animals
+                // 解析动物数据
+                updateAnimalList();
+            }
+        }
+
+        // 处理动物离开
+        function handleAnimalLeave(fields) {
+            if (fields[1]) { // id
+                gameState.animals.delete(fields[1]);
+                updateAnimalList();
+            }
+        }
+
+        // 处理动物死亡
+        function handleAnimalDie(fields) {
+            if (fields[3]) { // ids
+                // 处理死亡的动物列表
+                updateAnimalList();
+            }
+        }
+
+        // 处理彩金推送
+        function handleJackpot(fields) {
+            if (fields[1]) { // bonus
+                const bonus = new TextDecoder().decode(fields[1]);
+                gameState.jackpot = bonus;
+                document.getElementById('jackpot').textContent = bonus;
+            }
+        }
+
+        // 发送进入房间
+        function sendEnterRoom() {
+            const zooType = parseInt(document.getElementById('zooType').value);
+            sendMessage(1801, { 1: zooType });
+        }
+
+        // 发送离开房间
+        function sendLeaveRoom() {
+            sendMessage(1802, {});
+        }
+
+        // 发送发射子弹
+        function sendFireBullet() {
+            const betVal = parseInt(document.getElementById('betAmount').value);
+            sendMessage(1815, { 1: betVal });
+        }
+
+        // 发送下注
+        function sendBet() {
+            const targetId = parseInt(document.getElementById('targetAnimalId').value);
+            sendMessage(1803, { 1: targetId });
+        }
+
+        // 使用技能
+        function useSkill(skillType) {
+            sendMessage(1806, { 1: skillType });
+        }
+
+        // 发送购买技能
+        function sendBuySkill(skillType) {
+            sendMessage(1808, { 1: skillType });
+        }
+
+        // 发送获取场次信息
+        function sendGetZooInfo() {
+            sendMessage(1807, {});
+        }
+
+        // 发送获取记录
+        function sendGetRecord() {
+            sendMessage(1804, { 1: 1, 2: 10 });
+        }
+
+        // 发送获取大奖
+        function sendGetReward() {
+            sendMessage(1805, {});
+        }
+
+        // 发送获取彩金记录
+        function sendGetCJLog() {
+            sendMessage(1812, {});
+        }
+
+        // 发送获取道具价格
+        function sendGetToolsPrice() {
+            sendMessage(1809, {});
+        }
+
+        // 快速测试
+        function quickTest(type) {
+            switch(type) {
+                case 'enter':
+                    sendEnterRoom();
+                    break;
+                case 'shoot':
+                    sendEnterRoom();
+                    setTimeout(() => sendFireBullet(), 500);
+                    setTimeout(() => sendBet(), 1000);
+                    break;
+                case 'skill':
+                    sendEnterRoom();
+                    setTimeout(() => sendBuySkill(1), 500);
+                    setTimeout(() => useSkill(1), 1000);
+                    break;
+                case 'full':
+                    sendEnterRoom();
+                    setTimeout(() => sendFireBullet(), 1000);
+                    setTimeout(() => sendBet(), 2000);
+                    setTimeout(() => sendBuySkill(1), 3000);
+                    setTimeout(() => useSkill(1), 4000);
+                    setTimeout(() => sendLeaveRoom(), 10000);
+                    break;
+            }
+        }
+
+        // 添加消息到界面
+        function addMessage(tab, title, type, data = {}) {
+            const time = new Date().toLocaleTimeString();
+            const message = document.createElement('div');
+            message.className = `message ${type}`;
+
+            let content = `
+                <div class="message-header">
+                    <span class="message-type">${title}</span>
+                    <span class="message-time">${time}</span>
+                </div>
+            `;
+
+            if (Object.keys(data).length > 0) {
+                content += '<div class="proto-fields">';
+                for (const [key, value] of Object.entries(data)) {
+                    content += `
+                        <div class="proto-field">
+                            <span class="field-name">field_${key}</span>:
+                            <span class="field-value">${formatFieldValue(value)}</span>
+                        </div>
+                    `;
+                }
+                content += '</div>';
+            }
+
+            message.innerHTML = content;
+
+            // 添加到指定标签页
+            if (tab === 'all' || tab === type) {
+                document.getElementById(`tab-${tab}`).insertBefore(
+                    message,
+                    document.getElementById(`tab-${tab}`).firstChild
+                );
+            }
+
+            // 总是添加到全部标签页
+            if (tab !== 'all') {
+                const allMessage = message.cloneNode(true);
+                document.getElementById('tab-all').insertBefore(
+                    allMessage,
+                    document.getElementById('tab-all').firstChild
+                );
+            }
+        }
+
+        // 格式化字段值
+        function formatFieldValue(value) {
+            if (value instanceof Uint8Array) {
+                // 尝试作为字符串解码
+                try {
+                    return new TextDecoder().decode(value);
+                } catch {
+                    return `[${value.length} bytes]`;
+                }
+            } else if (Array.isArray(value)) {
+                return `[${value.join(', ')}]`;
+            } else if (typeof value === 'object') {
+                return JSON.stringify(value);
+            }
+            return value;
+        }
+
+        // 更新状态栏
+        function updateStatus(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            if (connected) {
+                indicator.classList.add('connected');
+                text.textContent = '已连接';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                indicator.classList.remove('connected');
+                text.textContent = '未连接';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        // 更新统计
+        function updateStats() {
+            document.getElementById('sentCount').textContent = sentCount;
+            document.getElementById('receivedCount').textContent = receivedCount;
+            document.getElementById('pushCount').textContent = pushCount;
+            document.getElementById('errorCount').textContent = errorCount;
+        }
+
+        // 更新房间信息
+        function updateRoomInfo() {
+            const roomType = ZOO_TYPES[gameState.roomType] || '未知';
+            document.getElementById('roomInfo').textContent = `房间: ${roomType}`;
+        }
+
+        // 更新动物列表
+        function updateAnimalList() {
+            const list = document.getElementById('animalList');
+            if (gameState.animals.size === 0) {
+                list.innerHTML = '<div style="text-align: center; color: #999;">暂无动物</div>';
+            } else {
+                list.innerHTML = '';
+                gameState.animals.forEach((animal, id) => {
+                    const item = document.createElement('div');
+                    item.className = 'animal-item';
+                    item.innerHTML = `
+                        <span class="animal-name">${ANIMAL_TYPES[animal.type] || '未知'}</span>
+                        <span class="animal-info">ID: ${id} | 线路: ${animal.line}</span>
+                    `;
+                    list.appendChild(item);
+                });
+            }
+        }
+
+        // 更新技能显示
+        function updateSkillDisplay() {
+            gameState.skills.forEach((skill, type) => {
+                const element = document.getElementById(`skill_${type}`);
+                if (element) {
+                    element.textContent = skill.count || 0;
+                }
+            });
+        }
+
+        // 切换标签页
+        function switchTab(tabName) {
+            // 切换标签按钮状态
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // 切换内容显示
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        // 显示错误
+        function showError(message) {
+            alert(message);
+        }
+
+        // 更新连接时间
+        setInterval(() => {
+            if (connectionStartTime) {
+                const elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                document.getElementById('connectionTime').textContent =
+                    `连接时长: ${minutes}分${seconds}秒`;
+            } else {
+                document.getElementById('connectionTime').textContent = '';
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
