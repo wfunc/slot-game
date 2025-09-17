@@ -34,7 +34,7 @@ var (
 type Server struct {
 	cfg      *config.Config
 	logger   *zap.Logger
-	
+
 	// 服务组件
 	router           *api.Router
 	httpServer       *http.Server
@@ -42,9 +42,10 @@ type Server struct {
 	serialController hardware.HardwareController  // 主控制器（STM32或ACM）
 	stm32Controller  *hardware.STM32Controller    // STM32控制器
 	acmController    *hardware.ACMController      // ACM控制器
+	serialLogService *service.SerialLogService    // 串口日志服务
 	cleanupTicker    *time.Ticker
 	// mqttClient    *mqtt.Client
-	
+
 	// 关闭控制
 	shutdownCh chan struct{}
 	wg         sync.WaitGroup
@@ -313,6 +314,19 @@ func (s *Server) initGameEngine() error {
 func (s *Server) initSerialManager() error {
 	s.logger.Info("初始化串口管理器...")
 
+	// 初始化串口日志服务
+	db := database.GetDB()
+	if db != nil {
+		serialLogService := service.NewSerialLogService(db)
+		if serialLogService != nil {
+			// NewSerialLogService 已经自动启动了后台写入协程
+			s.logger.Info("串口日志服务已启动")
+
+			// 存储日志服务引用以便后续使用
+			s.serialLogService = serialLogService
+		}
+	}
+
 	// 打印完整的串口配置用于调试
 	s.logger.Info("串口配置详情",
 		zap.Bool("serial.enabled", s.cfg.Serial.Enabled),
@@ -367,6 +381,11 @@ func (s *Server) initSerialManager() error {
 		}
 		
 		s.stm32Controller = hardware.NewSTM32Controller(stm32Config, nil)
+		// 连接串口日志服务
+		if s.serialLogService != nil {
+			s.stm32Controller.SetSerialLogService(s.serialLogService)
+			s.logger.Info("STM32控制器已连接串口日志服务")
+		}
 		s.serialController = s.stm32Controller // 设置为主控制器
 	}
 	
@@ -400,11 +419,16 @@ func (s *Server) initSerialManager() error {
 		
 		s.logger.Info("创建ACM控制器对象", zap.Any("config", acmConfig))
 		s.acmController = hardware.NewACMController(acmConfig)
-		
+
 		if s.acmController == nil {
 			s.logger.Error("ACM控制器创建失败：返回nil")
 		} else {
 			s.logger.Info("ACM控制器创建成功")
+			// 连接串口日志服务
+			if s.serialLogService != nil {
+				s.acmController.SetSerialLogService(s.serialLogService)
+				s.logger.Info("ACM控制器已连接串口日志服务")
+			}
 		}
 		
 		// 如果没有STM32，使用ACM作为主控制器
@@ -734,7 +758,14 @@ func (s *Server) closeComponents() error {
 			s.logger.Info("ACM控制器已关闭")
 		}
 	}
-	
+
+	// 停止串口日志服务
+	if s.serialLogService != nil {
+		s.logger.Info("停止串口日志服务...")
+		s.serialLogService.Close()
+		s.logger.Info("串口日志服务已停止")
+	}
+
 	// 关闭数据库连接
 	if err := database.Close(); err != nil {
 		s.logger.Error("关闭数据库失败", zap.Error(err))

@@ -21,6 +21,7 @@ type Router struct {
 	authHandler       *AuthHandler
 	slotHandler       *SlotHandler
 	walletHandler     *WalletHandler
+	serialLogHandler  *SerialLogAPI
 	wsHandler         *WebSocketHandler
 	protobufWsHandler *ProtobufWebSocketHandler
 	wsHub             *ws.Hub
@@ -66,6 +67,10 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), wsHandler, log)
 	walletHandler := NewWalletHandler(db, log)
 
+	// 创建串口日志处理器
+	serialLogService := service.NewSerialLogService(db)
+	serialLogHandler := NewSerialLogAPI(serialLogService)
+
 	// 创建中间件
 	authMiddleware := middleware.NewAuthMiddleware(services.Auth)
 
@@ -76,6 +81,7 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 		authHandler:       authHandler,
 		slotHandler:       slotHandler,
 		walletHandler:     walletHandler,
+		serialLogHandler:  serialLogHandler,
 		wsHandler:         wsHandler,
 		protobufWsHandler: protobufWsHandler,
 		wsHub:             wsHub,
@@ -174,11 +180,13 @@ func (r *Router) setupRoutes() {
 		admin := v1.Group("/admin")
 		admin.Use(r.authMiddleware.RequireRole("admin"))
 		{
-			// TODO: 实现管理员API
+			// 串口日志路由
+			r.serialLogHandler.RegisterRoutes(admin)
+
+			// TODO: 实现其他管理员API
 			// admin.GET("/users", r.adminHandler.GetUsers)
 			// admin.PUT("/users/:id/status", r.adminHandler.UpdateUserStatus)
 			// admin.GET("/stats", r.adminHandler.GetStatistics)
-			// admin.GET("/logs", r.adminHandler.GetLogs)
 		}
 	}
 

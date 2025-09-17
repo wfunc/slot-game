@@ -13,6 +13,7 @@ import (
 
 	"github.com/tarm/serial"
 	"github.com/wfunc/slot-game/internal/logger"
+	"github.com/wfunc/slot-game/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -65,6 +66,9 @@ type STM32Controller struct {
 	// 资源锁定
 	resourceLock sync.Mutex    // 资源操作锁
 	lockedResources map[byte]bool // 已锁定的资源ID映射
+
+	// 串口日志服务
+	serialLogService *service.SerialLogService
 }
 
 
@@ -85,6 +89,11 @@ func NewSTM32Controller(config *STM32Config, gameLogic GameLogicInterface) *STM3
 		gameLogic:   gameLogic,
 		lockedResources: make(map[byte]bool),
 	}
+}
+
+// SetSerialLogService 设置串口日志服务
+func (c *STM32Controller) SetSerialLogService(service *service.SerialLogService) {
+	c.serialLogService = service
 }
 
 // Connect 连接串口
@@ -289,7 +298,13 @@ func (c *STM32Controller) writeFrame(frame *Frame) error {
 		zap.Int("bytes", len(data)),
 		zap.Uint8("cmd", frame.Command),
 		zap.Uint16("seq", frame.Sequence))
-	
+
+	// 记录到数据库
+	if c.serialLogService != nil {
+		requestID := c.serialLogService.GenerateRequestID()
+		c.serialLogService.LogSTM32Send(data, fmt.Sprintf("% X", data), frame.Command, requestID)
+	}
+
 	n, err := c.port.Write(data)
 	if err != nil {
 		return err
@@ -381,7 +396,13 @@ func (c *STM32Controller) readLoop() {
 					zap.Uint8("cmd", frame.Command),
 					zap.Uint16("seq", frame.Sequence),
 					zap.Int("dataLen", len(frame.Data)))
-				
+
+				// 记录到数据库
+				if c.serialLogService != nil {
+					requestID := c.serialLogService.GenerateRequestID()
+					c.serialLogService.LogSTM32Receive(frameBuf[:frameLen], fmt.Sprintf("% X", frameBuf[:frameLen]), frame.Command, requestID)
+				}
+
 				// 处理帧
 				c.handleFrame(frame)
 				

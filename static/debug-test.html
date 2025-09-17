@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket调试测试</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #00ff00;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            background: #2a2a2a;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            cursor: pointer;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #000;
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #00ff00;
+        }
+        .log-send { color: #00ffff; }
+        .log-recv { color: #ffff00; }
+        .log-raw { color: #ff00ff; }
+        .log-error { color: #ff0000; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket调试测试</h1>
+
+    <button onclick="connect()">连接</button>
+    <button onclick="testHeartbeat()">测试心跳(2099)</button>
+    <button onclick="testConfig()">测试配置(2001)</button>
+    <button onclick="testEnterRoom()">进入房间(1801)</button>
+    <button onclick="disconnect()">断开</button>
+    <button onclick="clearLog()">清空日志</button>
+
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function log(msg, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-' + type;
+            const timestamp = new Date().toISOString().substr(11, 12);
+            entry.textContent = `[${timestamp}] ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function encodeProtobuf(msgId, data = {}) {
+            log(`编码消息 ID=${msgId} Data=${JSON.stringify(data)}`, 'send');
+
+            const jsonStr = JSON.stringify(data);
+            const encoder = new TextEncoder();
+            const jsonBytes = encoder.encode(jsonStr);
+
+            const totalLength = 2 + jsonBytes.length;
+            const buffer = new ArrayBuffer(6 + jsonBytes.length);
+            const view = new DataView(buffer);
+
+            view.setUint32(0, totalLength, false);
+            view.setUint16(4, msgId, false);
+            new Uint8Array(buffer, 6).set(jsonBytes);
+
+            // 调试：显示原始字节
+            const bytes = new Uint8Array(buffer);
+            log(`原始字节(${bytes.length}): ${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, 'raw');
+
+            return buffer;
+        }
+
+        function decodeProtobuf(buffer) {
+            try {
+                const view = new DataView(buffer);
+                const length = view.getUint32(0, false);
+                const msgId = view.getUint16(4, false);
+
+                log(`解码消息 长度=${length} ID=${msgId}`, 'recv');
+
+                let data = {};
+                if (buffer.byteLength > 6) {
+                    const decoder = new TextDecoder();
+                    const jsonBytes = new Uint8Array(buffer, 6);
+
+                    // 显示原始响应字节
+                    log(`响应字节: ${Array.from(jsonBytes.slice(0, 100)).map(b => b.toString(16).padStart(2, '0')).join(' ')}${jsonBytes.length > 100 ? '...' : ''}`, 'raw');
+
+                    try {
+                        const jsonStr = decoder.decode(jsonBytes);
+                        data = JSON.parse(jsonStr);
+                        log(`解码数据: ${JSON.stringify(data)}`, 'recv');
+                    } catch (e) {
+                        // 可能是真正的protobuf，尝试解析基本字段
+                        log(`非JSON数据，尝试Protobuf解析...`, 'recv');
+                        data = parseProtobufFields(jsonBytes);
+                    }
+                }
+
+                return { msgId, data };
+            } catch (error) {
+                log(`解码错误: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        function parseProtobufFields(bytes) {
+            // 简单的Protobuf字段解析
+            const result = {};
+            let i = 0;
+
+            while (i < bytes.length) {
+                if (i + 1 >= bytes.length) break;
+
+                const tag = bytes[i];
+                const fieldNumber = tag >> 3;
+                const wireType = tag & 0x07;
+
+                i++;
+
+                if (wireType === 0) { // Varint
+                    let value = 0;
+                    let shift = 0;
+                    while (i < bytes.length) {
+                        const b = bytes[i++];
+                        value |= (b & 0x7F) << shift;
+                        if ((b & 0x80) === 0) break;
+                        shift += 7;
+                    }
+                    result[`field_${fieldNumber}`] = value;
+                } else if (wireType === 2) { // Length-delimited
+                    let length = 0;
+                    let shift = 0;
+                    while (i < bytes.length) {
+                        const b = bytes[i++];
+                        length |= (b & 0x7F) << shift;
+                        if ((b & 0x80) === 0) break;
+                        shift += 7;
+                    }
+
+                    if (i + length <= bytes.length) {
+                        const strBytes = bytes.slice(i, i + length);
+                        try {
+                            const str = new TextDecoder().decode(strBytes);
+                            result[`field_${fieldNumber}`] = str;
+                        } catch {
+                            result[`field_${fieldNumber}`] = Array.from(strBytes);
+                        }
+                        i += length;
+                    } else {
+                        break;
+                    }
+                } else {
+                    // 跳过未知类型
+                    break;
+                }
+            }
+
+            log(`Protobuf解析结果: ${JSON.stringify(result)}`, 'recv');
+            return result;
+        }
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('已经连接', 'info');
+                return;
+            }
+
+            const url = 'ws://localhost:8080/ws/game?game=animal';
+            log(`连接到: ${url}`, 'info');
+
+            ws = new WebSocket(url);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                log('WebSocket连接成功', 'info');
+                messageCount = 0;
+            };
+
+            ws.onmessage = (event) => {
+                messageCount++;
+                log(`=== 收到消息 #${messageCount} ===`, 'recv');
+
+                if (event.data instanceof ArrayBuffer) {
+                    log(`二进制消息大小: ${event.data.byteLength} 字节`, 'recv');
+                    const message = decodeProtobuf(event.data);
+                    if (message) {
+                        log(`消息内容: ID=${message.msgId}, Data=${JSON.stringify(message.data)}`, 'recv');
+                    }
+                } else {
+                    log(`文本消息: ${event.data}`, 'recv');
+                }
+            };
+
+            ws.onerror = (error) => {
+                log(`WebSocket错误: ${error}`, 'error');
+            };
+
+            ws.onclose = (event) => {
+                log(`WebSocket关闭: code=${event.code}, reason=${event.reason}`, 'info');
+            };
+        }
+
+        function sendMessage(msgId, data = {}) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket未连接', 'error');
+                return;
+            }
+
+            log(`=== 发送消息 ===`, 'send');
+            const buffer = encodeProtobuf(msgId, data);
+            ws.send(buffer);
+            log(`消息已发送`, 'send');
+        }
+
+        function testHeartbeat() {
+            sendMessage(2099, {});
+        }
+
+        function testConfig() {
+            sendMessage(2001, {});
+        }
+
+        function testEnterRoom() {
+            sendMessage(1801, {});
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                log('连接已断开', 'info');
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // 页面加载完成
+        window.onload = () => {
+            log('调试工具已就绪', 'info');
+        };
+    </script>
+</body>
+</html>

@@ -97,11 +97,11 @@ func (r *JackpotRepository) AccumulateJackpot(tx *gorm.DB, gameID uint, betAmoun
 	}
 
 	for _, update := range updates {
-		// 更新JP池金额和统计
+		// 更新JP池金额和统计 (使用SQLite兼容的CASE语法替代LEAST)
 		result := tx.Model(&models.Jackpot{}).
 			Where("game_id = ? AND type = ? AND status = ?", gameID, update.Type, "active").
 			Updates(map[string]interface{}{
-				"amount":   gorm.Expr("LEAST(amount + ?, max_amount)", update.Amount),
+				"amount":   gorm.Expr("CASE WHEN amount + ? > max_amount THEN max_amount ELSE amount + ? END", update.Amount, update.Amount),
 				"total_in": gorm.Expr("total_in + ?", update.Amount),
 			})
 		
@@ -114,11 +114,11 @@ func (r *JackpotRepository) AccumulateJackpot(tx *gorm.DB, gameID uint, betAmoun
 			if err := r.InitializeJackpots(gameID); err != nil {
 				return err
 			}
-			// 重试更新
+			// 重试更新 (使用SQLite兼容的CASE语法替代LEAST)
 			if err := tx.Model(&models.Jackpot{}).
 				Where("game_id = ? AND type = ?", gameID, update.Type).
 				Updates(map[string]interface{}{
-					"amount":   gorm.Expr("LEAST(amount + ?, max_amount)", update.Amount),
+					"amount":   gorm.Expr("CASE WHEN amount + ? > max_amount THEN max_amount ELSE amount + ? END", update.Amount, update.Amount),
 					"total_in": gorm.Expr("total_in + ?", update.Amount),
 				}).Error; err != nil {
 				return fmt.Errorf("重试更新JP池 %s 失败: %w", update.Type, err)

@@ -451,6 +451,12 @@ func (c *ACMController) readLoop() {
 					zap.String("hex", fmt.Sprintf("% X", buffer[:n])),
 					zap.Int("bytes", n))
 
+				// 记录到数据库
+				if c.serialLogService != nil {
+					requestID := c.serialLogService.GenerateRequestID()
+					c.serialLogService.LogACMReceive(receivedData, fmt.Sprintf("% X", buffer[:n]), nil, requestID)
+				}
+
 				// 处理完整的消息（以\n或\r\n结尾）
 				for {
 					idx := strings.Index(msgBuffer, "\n")
@@ -664,6 +670,12 @@ func (c *ACMController) sendResponse(data interface{}) error {
 		zap.String("ascii", string(response)),
 		zap.String("hex", fmt.Sprintf("% X", response)),
 		zap.Int("bytes", len(response)))
+
+	// 记录到数据库
+	if c.serialLogService != nil {
+		requestID := c.serialLogService.GenerateRequestID()
+		c.serialLogService.LogACMSend("", response, fmt.Sprintf("% X", response), requestID)
+	}
 
 	n, err := c.port.Write(response)
 	if err != nil {
@@ -942,6 +954,12 @@ func (c *ACMController) SendAlgoCommand(bet int, prize int) (map[string]interfac
 		zap.String("command", cmd),
 		zap.String("hex", fmt.Sprintf("% X", cmdBytes)),
 		zap.Int("bytes", len(cmdBytes)))
+
+	// 记录到数据库
+	if c.serialLogService != nil {
+		requestID := c.serialLogService.GenerateRequestID()
+		c.serialLogService.LogACMSend(cmd, cmdBytes, fmt.Sprintf("% X", cmdBytes), requestID)
+	}
 
 	// 发送命令
 	n, err := c.port.Write(cmdBytes)

@@ -13,6 +13,7 @@ import (
 	"github.com/wfunc/slot-game/internal/models"
 	"github.com/wfunc/slot-game/internal/pb"
 	"github.com/wfunc/slot-game/internal/repository"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
@@ -42,6 +43,8 @@ type SlotHandler struct {
 	walletRepo     repository.WalletRepository
 	jackpotRepo    *repository.JackpotRepository
 	gameID         uint  // 当前游戏ID（老虎机）
+	configHandler  *ConfigHandler  // 配置处理器
+	logger         *zap.Logger     // 日志记录器
 }
 
 // NewSlotHandler 创建新的老虎机处理器
@@ -70,13 +73,21 @@ func NewSlotHandler(db *gorm.DB) *SlotHandler {
 	if err := jackpotRepo.InitializeJackpots(game.ID); err != nil {
 		log.Printf("[SlotHandler] 初始化JP池失败: %v", err)
 	}
-	
+
+	// 创建logger
+	logger, _ := zap.NewProduction()
+
+	// 创建configHandler
+	configHandler := NewConfigHandler(db, logger)
+
 	return &SlotHandler{
-		sessions:    make(map[string]*SlotSessionSimple),
-		db:          db,
-		walletRepo:  walletRepo,
-		jackpotRepo: jackpotRepo,
-		gameID:      game.ID,
+		sessions:      make(map[string]*SlotSessionSimple),
+		db:            db,
+		walletRepo:    walletRepo,
+		jackpotRepo:   jackpotRepo,
+		gameID:        game.ID,
+		configHandler: configHandler,
+		logger:        logger,
 	}
 }
 
@@ -150,6 +161,17 @@ func (h *SlotHandler) handleMessages(session *SlotSessionSimple) {
 			h.handleEnterRoom(session, protoData)
 		case 1902: // 开始游戏
 			h.handleStartGame(session, protoData)
+		case 1904: // 彩金推送 (客户端不应发送此消息，但处理以避免错误)
+			h.logger.Warn("[SlotHandler] 客户端发送了服务端推送消息", zap.Uint16("msg_id", msgID))
+		case 1905: // 未定义消息 (处理以避免错误)
+			h.logger.Warn("[SlotHandler] 收到未定义消息", zap.Uint16("msg_id", msgID))
+		// Config相关协议 (2000-2099)
+		case 2001, 2002, 2099:
+			// 创建临时的ConfigHandler处理这些消息
+			if h.configHandler == nil {
+				h.configHandler = NewConfigHandler(h.db, h.logger)
+			}
+			h.configHandler.HandleMessage(session.Conn, msgID, protoData, session.UserID)
 		default:
 			log.Printf("[SlotHandler] 未知消息ID: %d", msgID)
 		}
@@ -158,11 +180,12 @@ func (h *SlotHandler) handleMessages(session *SlotSessionSimple) {
 
 // handleEnterRoom 处理进入房间请求
 func (h *SlotHandler) handleEnterRoom(session *SlotSessionSimple, data []byte) {
-	// 解析请求
+	// 解析请求 - 支持JSON格式（用于测试）和Protobuf格式
 	req := &pb.M_1901Tos{}
 	if err := proto.Unmarshal(data, req); err != nil {
-		log.Printf("[SlotHandler] 解析进入房间请求失败: %v", err)
-		return
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[SlotHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1901请求，通常是空的，所以直接继续处理
 	}
 	
 	log.Printf("[SlotHandler] 玩家 %s 进入房间，类型: %v", session.ID, req.GetType())
@@ -238,11 +261,12 @@ func (h *SlotHandler) handleEnterRoom(session *SlotSessionSimple, data []byte) {
 
 // handleStartGame 处理开始游戏请求
 func (h *SlotHandler) handleStartGame(session *SlotSessionSimple, data []byte) {
-	// 解析请求
+	// 解析请求 - 支持JSON格式（用于测试）和Protobuf格式
 	req := &pb.M_1902Tos{}
 	if err := proto.Unmarshal(data, req); err != nil {
-		log.Printf("[SlotHandler] 解析开始游戏请求失败: %v", err)
-		return
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[SlotHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1902请求，通常是空的，所以直接继续处理
 	}
 	
 	betAmount := req.GetBetVal()

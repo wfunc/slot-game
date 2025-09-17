@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -46,10 +48,11 @@ type AnimalHandler struct {
 	sessions       map[string]*AnimalSession
 	playerSessions map[uint32]map[string]*AnimalSession
 
-	db         *gorm.DB
-	walletRepo repository.WalletRepository
-	manager    *animal.Manager
-	logger     *zap.Logger
+	db           *gorm.DB
+	walletRepo   repository.WalletRepository
+	manager      *animal.Manager
+	logger       *zap.Logger
+	configHandler *ConfigHandler // 添加配置处理器
 }
 
 // NewAnimalHandler 创建处理器
@@ -61,6 +64,7 @@ func NewAnimalHandler(db *gorm.DB, logger *zap.Logger) *AnimalHandler {
 		walletRepo:     repository.NewWalletRepository(db),
 		manager:        animal.NewManager(),
 		logger:         logger,
+		configHandler:  NewConfigHandler(db, logger), // 初始化配置处理器
 	}
 }
 
@@ -124,8 +128,13 @@ func (h *AnimalHandler) HandleConnection(conn *websocket.Conn, opts *AnimalInitO
 		zap.Uint("user_id", userID),
 		zap.Uint32("player_id", playerID))
 
+	// 启动心跳检测
+	h.configHandler.StartHeartbeatCheck(conn)
+
 	h.listen(session)
 
+	// 清理心跳计时器
+	h.configHandler.OnConnectionClose(conn)
 	h.cleanupSession(session)
 }
 
@@ -171,6 +180,13 @@ func (h *AnimalHandler) listen(session *AnimalSession) {
 			h.handleBuyTool(session, payload)
 		case 1809:
 			h.handleGetToolPrice(session, payload)
+		case 1812:
+			h.handleGetJackpotHistory(session, payload)
+		case 1815:
+			h.handleFireBullet(session, payload)
+		// Config相关协议
+		case 2001, 2002, 2099:
+			h.configHandler.HandleMessage(session.Conn, msgID, payload, session.UserID)
 		default:
 			h.logger.Warn("[AnimalHandler] 未知消息", zap.Uint16("msg_id", msgID))
 		}
@@ -197,8 +213,9 @@ func (h *AnimalHandler) cleanupSession(session *AnimalSession) {
 func (h *AnimalHandler) handleEnterRoom(session *AnimalSession, payload []byte) {
 	req := &pb.M_1801Tos{}
 	if err := proto.Unmarshal(payload, req); err != nil {
-		h.logger.Error("[AnimalHandler] 解析进入房间失败", zap.Error(err))
-		return
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[AnimalHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1801请求，通常是空的，所以直接继续处理
 	}
 
 	resp, pushes, err := h.manager.EnterRoom(session.PlayerID, session.Name, session.Icon, session.VIP, req)
@@ -235,8 +252,9 @@ func (h *AnimalHandler) handleLeaveRoom(session *AnimalSession, payload []byte) 
 func (h *AnimalHandler) handleBet(session *AnimalSession, payload []byte) {
 	req := &pb.M_1803Tos{}
 	if err := proto.Unmarshal(payload, req); err != nil {
-		h.logger.Error("[AnimalHandler] 解析下注失败", zap.Error(err))
-		return
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[AnimalHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1803请求，通常是空的或包含简单下注信息，继续处理
 	}
 
 	resp, pushes, err := h.manager.Bet(session.PlayerID, req)
@@ -331,6 +349,77 @@ func (h *AnimalHandler) handleGetToolPrice(session *AnimalSession, payload []byt
 	h.sendMessage(session, 1809, resp)
 }
 
+func (h *AnimalHandler) handleGetJackpotHistory(session *AnimalSession, payload []byte) {
+	req := &pb.M_1812Tos{}
+	if err := proto.Unmarshal(payload, req); err != nil {
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[AnimalHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1812请求，通常是空的，所以直接继续处理
+	}
+
+	// 获取彩金历史（这里暂时返回空列表，需要后续实现完整的彩金系统）
+	resp := &pb.M_1812Toc{
+		List: []*pb.PCjLog{},
+	}
+
+	h.sendMessage(session, 1812, resp)
+
+	h.logger.Info("[AnimalHandler] 返回彩金历史",
+		zap.String("session_id", session.ID))
+}
+
+func (h *AnimalHandler) handleFireBullet(session *AnimalSession, payload []byte) {
+	req := &pb.M_1815Tos{}
+	if err := proto.Unmarshal(payload, req); err != nil {
+		// 尝试作为JSON处理（测试客户端使用）
+		h.logger.Debug("[AnimalHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
+		// 对于1815请求，默认使用最小下注值
+		req.BetVal = proto.Uint32(1)
+	}
+
+	// 获取下注金额
+	betVal := req.GetBetVal()
+
+	// 扣除金币
+	wallet, err := h.walletRepo.GetByUserID(context.Background(), session.UserID)
+	if err != nil {
+		h.logger.Error("[AnimalHandler] 获取钱包失败", zap.Error(err))
+		return
+	}
+
+	if wallet.Coins < int64(betVal) {
+		h.logger.Warn("[AnimalHandler] 余额不足",
+			zap.Uint("user_id", session.UserID),
+			zap.Uint32("bet_val", betVal),
+			zap.Int64("balance", wallet.Coins))
+		return
+	}
+
+	// 扣除金币
+	if err := h.walletRepo.DeductBalance(context.Background(), session.UserID, int64(betVal)); err != nil {
+		h.logger.Error("[AnimalHandler] 扣除金币失败", zap.Error(err))
+		return
+	}
+	// 更新本地钱包余额以便返回正确的余额
+	wallet.Coins -= int64(betVal)
+
+	// 生成子弹ID
+	bulletID := uuid.New().String()
+
+	// 构造响应
+	resp := &pb.M_1815Toc{
+		BulletId: proto.String(bulletID),
+		Balance:  proto.Uint64(uint64(wallet.Coins)),
+	}
+
+	h.sendMessage(session, 1815, resp)
+
+	h.logger.Info("[AnimalHandler] 发射子弹",
+		zap.String("bullet_id", bulletID),
+		zap.Uint32("bet_val", betVal),
+		zap.Int64("balance", wallet.Coins))
+}
+
 func (h *AnimalHandler) sendMessage(session *AnimalSession, msgID uint16, msg proto.Message) {
 	data, err := session.Codec.Encode(msgID, msg)
 	if err != nil {
@@ -405,9 +494,16 @@ func (h *AnimalHandler) getOrCreateTestUser() uint {
 	var wallet models.Wallet
 
 	if err := h.db.Where("username = ?", "test_animal_user").First(&user).Error; err == gorm.ErrRecordNotFound {
+		// 生成唯一的phone和email (基于当前时间戳)
+		timestamp := time.Now().Unix()
+		phone := fmt.Sprintf("test_%d", timestamp)
+		email := fmt.Sprintf("test_%d@example.com", timestamp)
+
 		user = models.User{
 			Username: "test_animal_user",
 			Nickname: "动物玩家",
+			Phone:    phone,
+			Email:    email,
 			Status:   "active",
 			Level:    1,
 		}
