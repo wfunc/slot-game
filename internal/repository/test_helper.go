@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -12,10 +13,17 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// isCI 检查是否在CI环境中运行
+func isCI() bool {
+	// GitHub Actions 设置 CI=true
+	// 其他CI系统也通常设置 CI 环境变量
+	return os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true"
+}
+
 // SetupTestDB 为测试套件设置测试数据库
 func SetupTestDB() *gorm.DB {
-	// 使用实际的SQLite文件进行测试
-	db, err := gorm.Open(sqlite.Open("../../data/slot-game-test.db"), &gorm.Config{
+	// 使用内存数据库进行测试（更快，不需要文件系统，在所有环境中都能工作）
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
