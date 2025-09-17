@@ -1,0 +1,303 @@
+name: Auto Release Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # 跳过由GitHub Actions创建的提交，避免死循环
+    if: github.event.pusher.name != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Check if version bump is needed
+      id: check
+      run: |
+        # 检测是否是合并提交
+        PARENT_COUNT=$(git rev-list --parents -n 1 HEAD | wc -w)
+        PARENT_COUNT=$((PARENT_COUNT - 1))
+        echo "Parent count: $PARENT_COUNT"
+
+        if [ "$PARENT_COUNT" -gt 1 ]; then
+          # 合并提交：获取合并进来的所有文件变更
+          echo "Detected merge commit, getting all merged changes"
+          MERGE_BASE=$(git merge-base HEAD^1 HEAD^2 2>/dev/null || echo "")
+          if [ -n "$MERGE_BASE" ]; then
+            CHANGED_FILES=$(git diff --name-only $MERGE_BASE..HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD^2..HEAD)
+          fi
+        else
+          # 普通提交：获取相对于上一个提交的变更
+          CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --name-only $(git rev-list --max-parents=0 HEAD)..HEAD)
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+
+        # 检查是否只有无关文件（.md, docs/, .github/等）
+        SIGNIFICANT_CHANGES=false
+        while IFS= read -r file; do
+          # 跳过空行
+          [ -z "$file" ] && continue
+
+          # 检查是否是需要忽略的文件
+          if [[ ! "$file" =~ \.(md|txt)$ ]] &&
+             [[ ! "$file" =~ ^docs/ ]] &&
+             [[ ! "$file" =~ ^claudedocs/ ]] &&
+             [[ ! "$file" =~ ^\.github/ ]] &&
+             [[ "$file" != "VERSION" ]] &&
+             [[ "$file" != ".gitignore" ]] &&
+             [[ "$file" != "LICENSE" ]]; then
+            echo "Found significant change in: $file"
+            SIGNIFICANT_CHANGES=true
+            break
+          fi
+        done <<< "$CHANGED_FILES"
+
+        if [ "$SIGNIFICANT_CHANGES" = true ]; then
+          echo "Significant changes detected, version bump needed"
+          echo "needs_bump=true" >> $GITHUB_OUTPUT
+        else
+          echo "No significant changes, skipping version bump"
+          echo "needs_bump=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Get current version
+      if: steps.check.outputs.needs_bump == 'true'
+      id: get_version
+      run: |
+        # 检查VERSION文件是否存在
+        if [ ! -f VERSION ]; then
+          echo "0.0.0" > VERSION
+          git add VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: initialize VERSION file [skip ci]"
+          git push
+        fi
+
+        # 获取最新的tag版本
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "Latest tag: $LATEST_TAG"
+        TAG_VERSION=${LATEST_TAG#v}
+
+        # 获取VERSION文件中的版本
+        FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
+        echo "VERSION file: $FILE_VERSION"
+
+        # 比较tag版本和文件版本，取较大值
+        function version_gt() { test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"; }
+
+        if version_gt "$FILE_VERSION" "$TAG_VERSION"; then
+          VERSION="$FILE_VERSION"
+          echo "Using VERSION file: $VERSION (newer than tag)"
+        else
+          VERSION="$TAG_VERSION"
+          echo "Using tag version: $VERSION (newer or equal to file)"
+        fi
+
+        echo "Current version: $VERSION"
+        echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Calculate next version
+      if: steps.check.outputs.needs_bump == 'true'
+      id: next_version
+      run: |
+        VERSION="${{ steps.get_version.outputs.current_version }}"
+
+        # 分割版本号
+        IFS='.' read -r -a version_parts <<< "$VERSION"
+        MAJOR="${version_parts[0]:-0}"
+        MINOR="${version_parts[1]:-0}"
+        PATCH="${version_parts[2]:-0}"
+
+        # 默认递增patch版本
+        NEW_PATCH=$((PATCH + 1))
+        NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+
+        echo "New version: $NEW_VERSION"
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+    - name: Update VERSION file
+      if: steps.check.outputs.needs_bump == 'true'
+      run: |
+        echo "${{ steps.next_version.outputs.new_version }}" > VERSION
+
+        # 配置git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # 提交VERSION文件 - 添加 [skip ci] 以避免再次触发
+        git add VERSION
+        git commit -m "chore: bump version to ${{ steps.next_version.outputs.new_version }} [skip ci]"
+
+    - name: Run tests
+      if: steps.check.outputs.needs_bump == 'true'
+      run: |
+        echo "Running tests..."
+        go test ./... -v
+
+    - name: Build binary
+      if: steps.check.outputs.needs_bump == 'true'
+      run: |
+        echo "Building slot-game binary..."
+        # 构建多平台二进制文件
+        GOOS=linux GOARCH=amd64 go build -o dist/slot-game-linux-amd64 ./cmd/server
+        GOOS=linux GOARCH=arm64 go build -o dist/slot-game-linux-arm64 ./cmd/server
+        GOOS=darwin GOARCH=amd64 go build -o dist/slot-game-darwin-amd64 ./cmd/server
+        GOOS=darwin GOARCH=arm64 go build -o dist/slot-game-darwin-arm64 ./cmd/server
+        GOOS=windows GOARCH=amd64 go build -o dist/slot-game-windows-amd64.exe ./cmd/server
+
+        # 创建压缩包
+        cd dist
+        for file in *; do
+          if [ -f "$file" ]; then
+            tar -czf "${file}.tar.gz" "$file"
+            rm "$file"
+          fi
+        done
+        cd ..
+
+        echo "Build completed"
+
+    - name: Install git-cliff
+      if: steps.check.outputs.needs_bump == 'true'
+      run: |
+        wget -q https://github.com/orhun/git-cliff/releases/download/v1.4.0/git-cliff-1.4.0-x86_64-unknown-linux-gnu.tar.gz
+        tar -xzf git-cliff-1.4.0-x86_64-unknown-linux-gnu.tar.gz
+        chmod +x git-cliff-1.4.0/git-cliff
+        sudo mv git-cliff-1.4.0/git-cliff /usr/local/bin/
+
+    - name: Generate changelog
+      if: steps.check.outputs.needs_bump == 'true'
+      id: changelog
+      run: |
+        # 获取上一个tag以来的更新日志
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -n "$LATEST_TAG" ]; then
+          CHANGELOG=$(git-cliff --config .github/cliff.toml $LATEST_TAG..HEAD --strip header 2>/dev/null || echo "- 代码优化和改进")
+        else
+          CHANGELOG=$(git-cliff --config .github/cliff.toml --strip header 2>/dev/null || echo "- 初始版本发布")
+        fi
+        echo "content<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create and push tag
+      if: steps.check.outputs.needs_bump == 'true'
+      run: |
+        NEW_TAG="${{ steps.next_version.outputs.new_tag }}"
+        git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+        git push origin HEAD:main "$NEW_TAG"
+
+    - name: Create GitHub Release
+      if: steps.check.outputs.needs_bump == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.next_version.outputs.new_tag }}
+        name: Release ${{ steps.next_version.outputs.new_version }}
+        body: |
+          ## 🎮 Slot Game Server ${{ steps.next_version.outputs.new_version }}
+
+          ### 📦 下载
+
+          请在下方的 Assets 中下载对应平台的二进制文件。
+
+          ### 🐳 Docker 镜像（如可用）
+
+          ```bash
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.next_version.outputs.new_tag }}
+          docker pull ghcr.io/${{ github.repository }}:latest
+          ```
+
+          ### 📋 更新内容
+
+          ${{ steps.changelog.outputs.content }}
+
+          ### 🔧 安装说明
+
+          1. 下载对应平台的二进制文件
+          2. 解压：`tar -xzf slot-game-<platform>.tar.gz`
+          3. 赋予执行权限：`chmod +x slot-game-<platform>`
+          4. 运行：`./slot-game-<platform>`
+
+          ### 📝 配置文件
+
+          请参考项目根目录的 `config.example.yaml` 创建配置文件。
+        files: |
+          dist/*.tar.gz
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+
+    # 清理旧的releases（保留最近20个）
+    - name: Cleanup old releases
+      if: steps.check.outputs.needs_bump == 'true'
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "🧹 自动清理旧版本..."
+
+        # 获取所有release
+        releases=$(gh release list --limit 100 --json tagName,createdAt | jq -r '.[] | .tagName' | tail -n +21)
+
+        if [ -n "$releases" ]; then
+          echo "将要删除以下旧版本："
+          echo "$releases"
+
+          for tag in $releases; do
+            echo "删除 $tag ..."
+            gh release delete "$tag" --yes --cleanup-tag || true
+          done
+
+          echo "✅ 清理完成"
+        else
+          echo "无需清理，当前版本数量未超过限制"
+        fi
+
+    # 可选：构建Docker镜像
+    - name: Set up Docker Buildx
+      if: steps.check.outputs.needs_bump == 'true' && hashFiles('Dockerfile') != ''
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      if: steps.check.outputs.needs_bump == 'true' && hashFiles('Dockerfile') != ''
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      if: steps.check.outputs.needs_bump == 'true' && hashFiles('Dockerfile') != ''
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}:${{ steps.next_version.outputs.new_tag }}
+          ghcr.io/${{ github.repository }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
