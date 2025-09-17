@@ -2,9 +2,11 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/wfunc/slot-game/internal/pb"
 	ws "github.com/wfunc/slot-game/internal/websocket"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -12,15 +14,17 @@ import (
 
 // ProtobufWebSocketHandler 处理protobuf格式的WebSocket连接
 type ProtobufWebSocketHandler struct {
-	slotHandler *ws.SlotHandler
-	upgrader    websocket.Upgrader
-	logger      *zap.Logger
+	slotHandler   *ws.SlotHandler
+	animalHandler *ws.AnimalHandler
+	upgrader      websocket.Upgrader
+	logger        *zap.Logger
 }
 
 // NewProtobufWebSocketHandler 创建protobuf WebSocket处理器
 func NewProtobufWebSocketHandler(db *gorm.DB, logger *zap.Logger) *ProtobufWebSocketHandler {
 	return &ProtobufWebSocketHandler{
-		slotHandler: ws.NewSlotHandler(db),
+		slotHandler:   ws.NewSlotHandler(db),
+		animalHandler: ws.NewAnimalHandler(db, logger),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -39,10 +43,12 @@ func (h *ProtobufWebSocketHandler) HandleProtobufConnection(c *gin.Context) {
 	// 获取客户端信息
 	clientIP := c.ClientIP()
 	token := c.Query("token") // 可选的JWT token
+	game := c.DefaultQuery("game", "slot")
 
 	h.logger.Info("新的Protobuf WebSocket连接请求",
 		zap.String("ip", clientIP),
-		zap.Bool("has_token", token != ""))
+		zap.Bool("has_token", token != ""),
+		zap.String("game", game))
 
 	// 升级HTTP连接为WebSocket
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -53,6 +59,45 @@ func (h *ProtobufWebSocketHandler) HandleProtobufConnection(c *gin.Context) {
 		return
 	}
 
-	// 交给slot handler处理
+	if game == "animal" {
+		opts := parseAnimalInitOptions(c)
+		h.animalHandler.HandleConnection(conn, opts)
+		return
+	}
+
+	// 默认交给slot handler处理
 	h.slotHandler.HandleConnection(conn)
+}
+
+func parseAnimalInitOptions(c *gin.Context) *ws.AnimalInitOptions {
+	opts := &ws.AnimalInitOptions{}
+
+	if userIDStr := c.Query("user_id"); userIDStr != "" {
+		if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
+			opts.UserID = uint(id)
+		}
+	}
+
+	if playerIDStr := c.Query("player_id"); playerIDStr != "" {
+		if id, err := strconv.ParseUint(playerIDStr, 10, 32); err == nil {
+			opts.PlayerID = uint32(id)
+		}
+	}
+
+	opts.Name = c.Query("name")
+	opts.Icon = c.Query("icon")
+
+	if vipStr := c.Query("vip"); vipStr != "" {
+		if v, err := strconv.ParseUint(vipStr, 10, 32); err == nil {
+			opts.VIP = uint32(v)
+		}
+	}
+
+	if zooStr := c.Query("zoo_type"); zooStr != "" {
+		if v, err := strconv.ParseUint(zooStr, 10, 32); err == nil {
+			opts.ZooType = pb.EZooType(v)
+		}
+	}
+
+	return opts
 }
