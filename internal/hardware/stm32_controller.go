@@ -16,17 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// STM32Config 配置
-type STM32Config struct {
-	Port         string        // 串口端口
-	BaudRate     int           // 波特率
-	DataBits     int           // 数据位
-	StopBits     int           // 停止位
-	ReadTimeout  time.Duration // 读超时
-	WriteTimeout time.Duration // 写超时
-	RetryCount   int           // 重试次数
-	HeartbeatInterval time.Duration // 心跳间隔
-}
 
 // DefaultSTM32Config 默认配置
 func DefaultSTM32Config() *STM32Config {
@@ -78,45 +67,7 @@ type STM32Controller struct {
 	lockedResources map[byte]bool // 已锁定的资源ID映射
 }
 
-// PendingCommand 待确认的命令
-type PendingCommand struct {
-	Cmd      byte
-	Seq      uint16
-	Time     time.Time
-	Response chan error
-}
 
-// CoinStatistics 币统计数据
-type CoinStatistics struct {
-	CoinsInserted      uint16    // 投入的币数
-	CoinsDispensed     uint16    // 上币数量
-	CoinsReturnedFront uint16    // 前方回币
-	CoinsReturnedLeft  uint16    // 左侧回币
-	CoinsReturnedRight uint16    // 右侧回币
-	CoinsRefunded      uint16    // 退币数量
-	TicketsPrinted     uint16    // 彩票打印数量
-	FaultCount         uint8     // 故障次数
-	RecoveryCount      uint8     // 恢复次数
-	GameDuration       uint32    // 游戏时长（秒）
-	Timestamp          time.Time // 统计时间戳
-	ReturnRate         float64   // 回币率
-}
-
-// GameLogicInterface 游戏逻辑接口
-type GameLogicInterface interface {
-	GetCurrentMode() byte      // 获取当前模式（退币/彩票）
-	HasCredits() bool          // 是否有余额
-	GetPendingCoins() uint16  // 获取待上币数量
-	AddCredits(count byte)     // 增加余额
-	AddPlayerCoins(count byte) // 增加玩家币数
-	UpdateReturnRate(rate float64) // 更新回币率
-	GetRefundableCoins() uint16   // 获取可退币数
-	GetAvailableTickets() uint16  // 获取可用彩票数
-	DeductCoins(count uint16)     // 扣除币数
-	RedeemTickets(count uint16)   // 兑换彩票
-	StartGame(coinCount uint16)   // 开始游戏
-	SetDifficulty(level byte)     // 设置难度
-}
 
 // NewSTM32Controller 创建STM32控制器
 func NewSTM32Controller(config *STM32Config, gameLogic GameLogicInterface) *STM32Controller {

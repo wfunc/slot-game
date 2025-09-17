@@ -16,21 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ACMConfig ACM设备配置
-type ACMConfig struct {
-	Port         string        // 串口端口（"auto"表示自动检测）
-	BaudRate     int           // 波特率
-	ReadTimeout  time.Duration // 读超时
-	WriteTimeout time.Duration // 写超时
-	AutoDetect   bool          // 是否自动检测设备
-
-	// Algo命令定时器配置
-	AlgoTimerEnabled  bool          // 是否启用algo定时器
-	AlgoTimerInterval time.Duration // algo命令发送间隔
-	AlgoBet           int           // algo命令的bet参数
-	AlgoPrize         int           // algo命令的prize参数
-}
-
 // DefaultACMConfig 默认ACM配置
 func DefaultACMConfig() *ACMConfig {
 	return &ACMConfig{

@@ -306,12 +306,61 @@ func (g *GameLogicAdapter) SetCallbacks(
 func (g *GameLogicAdapter) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	g.credits = 0
 	g.playerCoins = 0
 	g.tickets = 0
 	g.pendingCoins = 0
 	g.returnRate = 0
-	
+
 	g.logger.Info("游戏状态重置")
+}
+
+// ProcessCoinInserted 处理投币事件
+func (g *GameLogicAdapter) ProcessCoinInserted(count uint8) {
+	g.AddCredits(byte(count))
+}
+
+// ProcessCoinReturned 处理回币事件
+func (g *GameLogicAdapter) ProcessCoinReturned(position string, count uint8) {
+	g.AddPlayerCoins(byte(count))
+	g.logger.Info("处理回币",
+		zap.String("position", position),
+		zap.Uint8("count", count))
+}
+
+// ProcessJackpot 处理中奖事件
+func (g *GameLogicAdapter) ProcessJackpot(data JackpotData) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.playerCoins += int64(data.Amount)
+	g.totalWins += int64(data.Amount)
+
+	g.logger.Info("处理中奖",
+		zap.String("type", data.Type),
+		zap.Uint32("amount", data.Amount))
+
+	if g.onGameEnd != nil {
+		result := &GameResult{
+			Won:        true,
+			WinAmount:  int64(data.Amount),
+			ReturnRate: g.returnRate,
+			Timestamp:  data.Timestamp,
+		}
+		g.onGameEnd(result)
+	}
+}
+
+// GetStatus 获取游戏状态
+func (g *GameLogicAdapter) GetStatus() GameStatus {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	return GameStatus{
+		IsRunning:  g.lastGameTime.Add(5 * time.Minute).After(time.Now()),
+		Credits:    int(g.credits),
+		BetAmount:  int(g.minBet),
+		WinAmount:  int(g.playerCoins),
+	}
 }

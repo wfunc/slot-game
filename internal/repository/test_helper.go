@@ -22,13 +22,21 @@ func isCI() bool {
 
 // SetupTestDB 为测试套件设置测试数据库
 func SetupTestDB() *gorm.DB {
-	// 使用内存数据库进行测试（更快，不需要文件系统，在所有环境中都能工作）
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+	// 使用共享内存模式以支持并发测试
+	// file::memory:?cache=shared 允许多个连接共享同一个内存数据库
+	// _journal_mode=WAL 启用 Write-Ahead Logging 以更好地支持并发写入
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_journal_mode=WAL"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		panic(err)
 	}
+
+	// 设置连接池参数以支持并发
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(25)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 
 	// 清理所有表数据（保留表结构）
 	// 注意：清理顺序很重要，先清理有外键依赖的表
@@ -115,11 +123,19 @@ func CleanupTestDB(db *gorm.DB) {
 
 // TestDB 创建测试数据库
 func TestDB(t *testing.T) *gorm.DB {
-	// 使用内存数据库进行测试（更快，不需要文件系统，在所有环境中都能工作）
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+	// 使用共享内存模式以支持并发测试
+	// file::memory:?cache=shared 允许多个连接共享同一个内存数据库
+	// _journal_mode=WAL 启用 Write-Ahead Logging 以更好地支持并发写入
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_journal_mode=WAL"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+
+	// 设置连接池参数以支持并发
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(25)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 
 	// 清理所有表数据（保留表结构）
 	// 注意：清理顺序很重要，先清理有外键依赖的表
