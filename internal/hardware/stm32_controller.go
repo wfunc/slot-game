@@ -1,3 +1,6 @@
+//go:build !noserialhw
+// +build !noserialhw
+
 package hardware
 
 import (

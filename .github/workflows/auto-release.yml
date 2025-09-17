@@ -160,24 +160,30 @@ jobs:
       if: steps.check.outputs.needs_bump == 'true'
       run: |
         echo "Building slot-game binary..."
-        # 构建多平台二进制文件
-        GOOS=linux GOARCH=amd64 go build -o dist/slot-game-linux-amd64 ./cmd/server
-        GOOS=linux GOARCH=arm64 go build -o dist/slot-game-linux-arm64 ./cmd/server
-        GOOS=darwin GOARCH=amd64 go build -o dist/slot-game-darwin-amd64 ./cmd/server
-        GOOS=darwin GOARCH=arm64 go build -o dist/slot-game-darwin-arm64 ./cmd/server
-        GOOS=windows GOARCH=amd64 go build -o dist/slot-game-windows-amd64.exe ./cmd/server
+        # 创建dist目录
+        mkdir -p dist
+
+        # 只构建当前平台（Linux）的二进制文件
+        # 由于串口依赖，跨平台编译暂不支持
+        echo "Building Linux amd64..."
+        go build -o dist/slot-game-linux-amd64 ./cmd/server
 
         # 创建压缩包
         cd dist
         for file in *; do
           if [ -f "$file" ]; then
+            echo "Compressing $file..."
             tar -czf "${file}.tar.gz" "$file"
             rm "$file"
           fi
         done
         cd ..
 
-        echo "Build completed"
+        echo "Build completed. Files in dist:"
+        ls -la dist/
+
+        echo "Note: Cross-platform binaries are not available due to serial port dependencies."
+        echo "Please build from source for other platforms."
 
     - name: Install git-cliff
       if: steps.check.outputs.needs_bump == 'true'

@@ -1,3 +1,6 @@
+//go:build !noserialhw
+// +build !noserialhw
+
 package hardware
 
 import (
@@ -6,7 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"github.com/tarm/serial"
 	"github.com/wfunc/slot-game/internal/logger"
 	"go.uber.org/zap"
