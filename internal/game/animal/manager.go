@@ -3,6 +3,7 @@ package animal
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"sort"
 	"time"
@@ -64,23 +65,31 @@ var defaultAnimalOrder = []pb.EAnimal{
 // NewManager 创建动物游戏管理器
 func NewManager() *Manager {
 	m := &Manager{
-		rooms:   make(map[pb.EZooType]*Room),
-		players: make(map[uint32]*Player),
-		rewards: make([]*pb.PAnimalReward, 0, 32),
-		rand:    randSource(),
+		rooms:       make(map[uint32]*Room),
+		roomsByType: make(map[pb.EZooType][]uint32),
+		nextRoomID:  1,
+		players:     make(map[uint32]*Player),
+		rewards:     make([]*pb.PAnimalReward, 0, 32),
+		rand:        randSource(),
 	}
 
+	// 初始化时只为每个房间类型创建1个房间
 	for zooType, bets := range defaultBetValues {
+		roomID := m.nextRoomID
+		m.nextRoomID++
+		
 		room := &Room{
-			Type:         zooType,
-			BetValues:    append([]uint32(nil), bets...),
-			MaxPlayer:    100,
-			MinVIP:       vipRequirement[zooType],
-			animals:      make(map[uint32]*AnimalRoute),
-			nextAnimalID: 1,
-			players:      make(map[uint32]*PlayerSession),
-			jackpot:      5000000,
-			redBag:       true,
+			ID:             roomID,
+			Type:           zooType,
+			BetValues:      append([]uint32(nil), bets...),
+			MaxPlayer:      MAX_PLAYERS_PER_ROOM,
+			MinVIP:         vipRequirement[zooType],
+			CurrentPlayers: 0,
+			animals:        make(map[uint32]*AnimalRoute),
+			nextAnimalID:   1,
+			players:        make(map[uint32]*PlayerSession),
+			jackpot:        5000000,
+			redBag:         true,
 		}
 
 		// 初始生成动物
@@ -89,10 +98,82 @@ func NewManager() *Manager {
 			room.spawnAnimal(animal, m.rand)
 		}
 
-		m.rooms[zooType] = room
+		m.rooms[roomID] = room
+		m.roomsByType[zooType] = []uint32{roomID}
 	}
 
 	return m
+}
+
+// FindOrCreateRoom 查找或创建房间
+// 如果指定类型有未满员的房间，返回该房间
+// 如果所有房间都满员，创建新房间
+func (m *Manager) FindOrCreateRoom(zooType pb.EZooType) (*Room, error) {
+	// 注意：此方法应该在调用者已经持有锁的情况下调用
+	
+	// 查找该类型的所有房间
+	roomIDs, exists := m.roomsByType[zooType]
+	if !exists || len(roomIDs) == 0 {
+		// 该类型还没有房间，创建第一个
+		return m.createRoom(zooType)
+	}
+	
+	// 查找第一个未满员的房间
+	for _, roomID := range roomIDs {
+		room, ok := m.rooms[roomID]
+		if !ok {
+			continue
+		}
+		if room.CurrentPlayers < room.MaxPlayer {
+			// 找到未满员的房间
+			return room, nil
+		}
+	}
+	
+	// 所有房间都满员，创建新房间
+	return m.createRoom(zooType)
+}
+
+// createRoom 创建新房间
+func (m *Manager) createRoom(zooType pb.EZooType) (*Room, error) {
+	// 从defaultBetValues获取配置
+	bets, ok := defaultBetValues[zooType]
+	if !ok {
+		return nil, fmt.Errorf("unknown zoo type: %v", zooType)
+	}
+	
+	roomID := m.nextRoomID
+	m.nextRoomID++
+	
+	room := &Room{
+		ID:             roomID,
+		Type:           zooType,
+		BetValues:      append([]uint32(nil), bets...),
+		MaxPlayer:      MAX_PLAYERS_PER_ROOM,
+		MinVIP:         vipRequirement[zooType],
+		CurrentPlayers: 0,
+		animals:        make(map[uint32]*AnimalRoute),
+		nextAnimalID:   1,
+		players:        make(map[uint32]*PlayerSession),
+		jackpot:        5000000,
+		redBag:         true,
+	}
+	
+	// 初始生成动物
+	for i := 0; i < 10; i++ {
+		animal := defaultAnimalOrder[i%len(defaultAnimalOrder)]
+		room.spawnAnimal(animal, m.rand)
+	}
+	
+	// 添加到管理器
+	m.rooms[roomID] = room
+	m.roomsByType[zooType] = append(m.roomsByType[zooType], roomID)
+	
+	// 记录日志
+	log.Printf("[Manager] 创建新房间: ID=%d, Type=%v, MaxPlayers=%d", 
+		roomID, zooType, room.MaxPlayer)
+	
+	return room, nil
 }
 
 func randSource() *rand.Rand {
@@ -106,9 +187,10 @@ func (m *Manager) EnterRoom(playerID uint32, name, icon string, vip uint32, req 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	room, ok := m.rooms[zooType]
-	if !ok {
-		return nil, nil, ErrRoomNotFound
+	// 查找或创建合适的房间
+	room, err := m.FindOrCreateRoom(zooType)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if vip < room.MinVIP {
@@ -137,6 +219,9 @@ func (m *Manager) EnterRoom(playerID uint32, name, icon string, vip uint32, req 
 		}
 
 		room.players[playerID] = session
+		room.CurrentPlayers++
+		log.Printf("[Manager] 玩家 %d 进入房间 %d，当前人数 %d/%d", 
+			playerID, room.ID, room.CurrentPlayers, room.MaxPlayer)
 	} else {
 		session.Player = player
 	}
@@ -201,14 +286,17 @@ func (m *Manager) LeaveRoom(playerID uint32, req *pb.M_1802Tos) (*pb.M_1802Toc, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for zooType, room := range m.rooms {
+	for _, room := range m.rooms {
 		if session, ok := room.players[playerID]; ok {
 			total := clampUint32(session.TotalWin)
 			delete(room.players, playerID)
+			room.CurrentPlayers--
+			log.Printf("[Manager] 玩家 %d 离开房间 %d，当前人数 %d/%d", 
+				playerID, room.ID, room.CurrentPlayers, room.MaxPlayer)
 
 			push := PushMessage{
 				MsgID:   1885,
-				ZooType: zooType,
+				ZooType: room.Type,
 				Targets: room.otherPlayerIDs(playerID),
 				Message: &pb.M_1885Toc{RoleId: proto.Uint32(playerID)},
 			}

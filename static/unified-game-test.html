@@ -202,7 +202,7 @@
             </div>
 
             <div id="animalActions" class="quick-action" style="display: none;">
-                <button onclick="sendMessage(1801, {})">进入房间</button>
+                <button onclick="sendMessage(1801, {type: 7})">进入Free房间</button>
                 <button onclick="sendMessage(1802, {})">退出房间</button>
                 <button onclick="sendMessage(1803, {})">开火射击</button>
                 <button onclick="sendMessage(1815, {bulletId: 1, x: 500, y: 300, angle: 45})">发射子弹</button>
@@ -257,7 +257,7 @@
                 <button class="template-button" onclick="setTemplate(1901, '{}')">1901-开始游戏</button>
                 <button class="template-button" onclick="setTemplate(1902, '{\"bet\": 100, \"lines\": 25}')">1902-转动</button>
                 <button class="template-button" onclick="setTemplate(1903, '{\"bet\": 100, \"count\": 10}')">1903-批量转动</button>
-                <button class="template-button" onclick="setTemplate(1801, '{}')">1801-进入房间</button>
+                <button class="template-button" onclick="setTemplate(1801, '{\"type\": 7}')">1801-进入Free房间</button>
                 <button class="template-button" onclick="setTemplate(1803, '{}')">1803-开火</button>
                 <button class="template-button" onclick="setTemplate(2099, '{}')">2099-心跳</button>
                 <button class="template-button" onclick="setTemplate(2001, '{}')">2001-获取配置</button>
@@ -274,39 +274,224 @@
         let jackpotUpdateInterval = null;
         let currentJackpot = 0;
 
-        // Protobuf编码
-        function encodeMessage(msgId, data) {
-            const jsonStr = JSON.stringify(data || {});
-            const encoder = new TextEncoder();
-            const jsonBytes = encoder.encode(jsonStr);
+        // Protobuf wire types
+        const WIRE_TYPES = {
+            VARINT: 0,
+            FIXED64: 1,
+            LENGTH_DELIMITED: 2,
+            FIXED32: 5
+        };
 
-            const totalLength = 2 + jsonBytes.length;
-            const buffer = new ArrayBuffer(6 + jsonBytes.length);
+        // 动物游戏字段名称映射
+        const FIELD_NAMES = {
+            1801: { // m_1801_toc - 进入房间响应
+                1: 'bet_values (下注档位)',
+                2: 'odds (赔率信息)',
+                3: 'animals (动物列表)'
+            },
+            1815: { // m_1815_toc - 射击响应
+                1: 'bullet_id (子弹ID)',
+                2: 'hit_animals (击中动物)',
+                3: 'bonus (奖励)'
+            },
+            2001: { // m_2001_toc - 配置响应
+                1: 'role_id (玩家ID)',
+                2: 'balance (余额)',
+                3: 'config (配置信息)'
+            },
+            2099: { // 心跳响应
+                1: 'timestamp (时间戳)'
+            }
+        };
+
+        // Protobuf解析器
+        class ProtobufParser {
+            constructor(bytes) {
+                this.bytes = bytes;
+                this.offset = 0;
+            }
+
+            readVarint() {
+                let value = 0;
+                let shift = 0;
+                while (this.offset < this.bytes.length) {
+                    const byte = this.bytes[this.offset++];
+                    value |= (byte & 0x7F) << shift;
+                    if ((byte & 0x80) === 0) {
+                        return value;
+                    }
+                    shift += 7;
+                }
+                throw new Error('Varint too long');
+            }
+
+            readFixed32() {
+                if (this.offset + 4 > this.bytes.length) {
+                    throw new Error('Not enough bytes for fixed32');
+                }
+                const view = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 4);
+                this.offset += 4;
+                return view.getUint32(0, true); // little-endian
+            }
+
+            readFixed64() {
+                if (this.offset + 8 > this.bytes.length) {
+                    throw new Error('Not enough bytes for fixed64');
+                }
+                const view = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 8);
+                this.offset += 8;
+                return view.getUint32(0, true);
+            }
+
+            readBytes(length) {
+                if (this.offset + length > this.bytes.length) {
+                    throw new Error('Not enough bytes');
+                }
+                const result = this.bytes.slice(this.offset, this.offset + length);
+                this.offset += length;
+                return result;
+            }
+
+            parseMessage() {
+                const fields = {};
+
+                while (this.offset < this.bytes.length) {
+                    const tag = this.readVarint();
+                    const fieldNumber = tag >>> 3;
+                    const wireType = tag & 0x07;
+
+                    let value;
+                    switch (wireType) {
+                        case WIRE_TYPES.VARINT:
+                            value = this.readVarint();
+                            break;
+                        case WIRE_TYPES.FIXED64:
+                            value = this.readFixed64();
+                            break;
+                        case WIRE_TYPES.LENGTH_DELIMITED:
+                            const length = this.readVarint();
+                            const bytes = this.readBytes(length);
+                            try {
+                                const parser = new ProtobufParser(bytes);
+                                value = parser.parseMessage();
+                            } catch (e) {
+                                value = bytes;
+                            }
+                            break;
+                        case WIRE_TYPES.FIXED32:
+                            value = this.readFixed32();
+                            break;
+                        default:
+                            throw new Error(`Unknown wire type: ${wireType}`);
+                    }
+
+                    if (fields[fieldNumber]) {
+                        if (Array.isArray(fields[fieldNumber])) {
+                            fields[fieldNumber].push(value);
+                        } else {
+                            fields[fieldNumber] = [fields[fieldNumber], value];
+                        }
+                    } else {
+                        fields[fieldNumber] = value;
+                    }
+                }
+
+                return fields;
+            }
+        }
+
+        // Varint编码
+        function encodeVarint(value) {
+            const bytes = [];
+            while (value > 0x7f) {
+                bytes.push((value & 0x7f) | 0x80);
+                value >>>= 7;
+            }
+            bytes.push(value & 0x7f);
+            return bytes;
+        }
+
+        // 编码Protobuf消息
+        function encodeMessage(msgId, data = {}) {
+            let protoData = new Uint8Array(0);
+
+            if (msgId === 1801) {
+                // m_1801_tos: 进入房间，type = 7 (free房间)
+                const zooType = data.type || 7;
+                const typeBytes = encodeVarint(zooType);
+                protoData = new Uint8Array([0x08, ...typeBytes]); // field 1, varint
+            } else if (msgId === 1815) {
+                // m_1815_tos: 发射子弹
+                const fields = [];
+                if (data.bulletId) {
+                    fields.push(0x08, ...encodeVarint(data.bulletId)); // field 1
+                }
+                if (data.x !== undefined) {
+                    fields.push(0x10, ...encodeVarint(data.x)); // field 2
+                }
+                if (data.y !== undefined) {
+                    fields.push(0x18, ...encodeVarint(data.y)); // field 3
+                }
+                if (data.angle !== undefined) {
+                    fields.push(0x20, ...encodeVarint(data.angle)); // field 4
+                }
+                protoData = new Uint8Array(fields);
+            } else if (msgId === 2001) {
+                // m_2001_tos: 获取配置，通常是空消息
+                protoData = new Uint8Array(0);
+            } else if (msgId === 2099) {
+                // 心跳消息，通常是空消息
+                protoData = new Uint8Array(0);
+            }
+
+            // 计算总长度（2字节消息ID + protobuf数据）
+            const totalLength = 2 + protoData.length;
+
+            // 创建完整的消息缓冲区
+            const buffer = new ArrayBuffer(4 + totalLength);
             const view = new DataView(buffer);
+            const bytes = new Uint8Array(buffer);
 
+            // 写入长度（4字节，大端序）
             view.setUint32(0, totalLength, false);
+
+            // 写入消息ID（2字节，大端序）
             view.setUint16(4, msgId, false);
-            new Uint8Array(buffer, 6).set(jsonBytes);
+
+            // 写入protobuf数据
+            bytes.set(protoData, 6);
 
             return buffer;
         }
 
-        // Protobuf解码
+        // 解码完整的Protobuf消息
         function decodeMessage(buffer) {
+            if (buffer.byteLength < 6) {
+                return {
+                    msgId: 0,
+                    data: {},
+                    error: '消息太短，无法解析'
+                };
+            }
+
             const view = new DataView(buffer);
+
+            // 读取长度（4字节）
             const length = view.getUint32(0, false);
+
+            // 读取消息ID（2字节）
             const msgId = view.getUint16(4, false);
 
+            // 获取数据部分
+            const dataBytes = new Uint8Array(buffer, 6);
+
             let data = {};
-            if (buffer.byteLength > 6) {
-                const decoder = new TextDecoder();
-                const jsonBytes = new Uint8Array(buffer, 6);
+            if (dataBytes.length > 0) {
                 try {
-                    const jsonStr = decoder.decode(jsonBytes);
-                    data = JSON.parse(jsonStr);
+                    const parser = new ProtobufParser(dataBytes);
+                    data = parser.parseMessage();
                 } catch (e) {
-                    // 如果不是JSON，可能是真正的Protobuf，暂时返回原始数据
-                    data = { raw: Array.from(jsonBytes) };
+                    data = { parseError: e.message, raw: Array.from(dataBytes) };
                 }
             }
 
@@ -354,7 +539,7 @@
                 setTimeout(() => {
                     sendMessage(2001, {}); // 获取配置
                     if (gameType === 'animal') {
-                        sendMessage(1801, {}); // 进入房间
+                        sendMessage(1801, {type: 7}); // 进入Free房间
                     }
                 }, 500);
             };
@@ -407,6 +592,36 @@
             log(`发送 [${msgId}]: ${JSON.stringify(data)}`, 'send');
         }
 
+        // 格式化Protobuf字段为人类可读
+        function formatProtobufFields(msgId, fields, indent = '') {
+            const fieldNames = FIELD_NAMES[msgId] || {};
+            let html = '';
+
+            for (const [fieldNum, value] of Object.entries(fields)) {
+                const fieldName = fieldNames[fieldNum] || `field_${fieldNum}`;
+
+                if (value instanceof Uint8Array) {
+                    // 字节数组，可能是嵌套消息
+                    try {
+                        const parser = new ProtobufParser(value);
+                        const nestedFields = parser.parseMessage();
+                        html += `${indent}${fieldName}: [嵌套消息] ${JSON.stringify(nestedFields)}<br>`;
+                    } catch (e) {
+                        const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        html += `${indent}${fieldName}: ${hex} [bytes]<br>`;
+                    }
+                } else if (typeof value === 'object' && !Array.isArray(value)) {
+                    html += `${indent}${fieldName}: ${JSON.stringify(value)}<br>`;
+                } else if (Array.isArray(value)) {
+                    html += `${indent}${fieldName}: [${value.join(', ')}]<br>`;
+                } else {
+                    html += `${indent}${fieldName}: ${value}<br>`;
+                }
+            }
+
+            return html;
+        }
+
         function handleMessage(msgId, data) {
             // 特殊处理不同类型的消息
             switch (msgId) {
@@ -419,16 +634,30 @@
                     break;
 
                 case 2001: // 配置响应
-                    log(`收到配置 [${msgId}]: ${JSON.stringify(data)}`, 'receive');
-                    if (data.RoleId) {
-                        document.getElementById('playerId').textContent = data.RoleId;
+                    log(`收到配置 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
+                    if (data[1]) { // role_id
+                        document.getElementById('playerId').textContent = data[1];
                     }
-                    if (data.Balance !== undefined) {
-                        document.getElementById('balance').textContent = data.Balance;
+                    if (data[2] !== undefined) { // balance
+                        document.getElementById('balance').textContent = data[2];
                     }
                     // 显示彩金面板
                     document.getElementById('jackpotPanel').style.display = 'block';
                     startJackpotUpdate();
+                    break;
+
+                case 1801: // 进入房间响应
+                    log(`进入房间响应 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
+                    if (data[3]) { // animals
+                        log(`🐾 检测到动物数据: ${Array.isArray(data[3]) ? data[3].length : '1'} 个动物`, 'info');
+                    }
+                    break;
+
+                case 1815: // 射击响应
+                    log(`射击响应 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
+                    if (data[2]) { // hit_animals
+                        log(`🎯 击中动物! 奖励: ${data[3] || 0}`, 'jackpot');
+                    }
                     break;
 
                 case 1810: // 彩金推送
@@ -447,15 +676,15 @@
                     break;
 
                 case 1812: // 彩金历史
-                    log(`彩金历史 [${msgId}]: ${JSON.stringify(data)}`, 'receive');
+                    log(`彩金历史 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
                     break;
 
                 case 1802: // Animal房间信息
-                    log(`房间信息 [${msgId}]: 玩家数=${data.PlayerCount || 0}`, 'receive');
+                    log(`房间信息 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
                     break;
 
                 default:
-                    log(`收到 [${msgId}]: ${JSON.stringify(data)}`, 'receive');
+                    log(`收到 [${msgId}]: ${formatProtobufFields(msgId, data)}`, 'receive');
                     break;
             }
         }

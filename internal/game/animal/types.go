@@ -18,16 +18,26 @@ import (
 type PushMessage struct {
 	MsgID   uint16
 	ZooType pb.EZooType
+	RoomID  uint32      // 房间ID，用于动态房间管理
 	Targets []uint32
 	Message proto.Message
 }
 
 // Manager 负责管理所有动物房间和活动场
 
+const (
+	// MAX_PLAYERS_PER_ROOM 每个房间最大玩家数
+	MAX_PLAYERS_PER_ROOM = 4
+)
+
 type Manager struct {
 	mu sync.RWMutex
 
-	rooms        map[pb.EZooType]*Room
+	// 动态房间管理
+	rooms        map[uint32]*Room              // roomID -> Room
+	roomsByType  map[pb.EZooType][]uint32      // zooType -> roomID list
+	nextRoomID   uint32                        // 下一个房间ID
+	
 	players      map[uint32]*Player
 	rewards      []*pb.PAnimalReward
 	rewardCursor uint32
@@ -37,10 +47,12 @@ type Manager struct {
 // Room 表示一个动物房间实例
 
 type Room struct {
-	Type      pb.EZooType
-	BetValues []uint32
-	MaxPlayer uint32
-	MinVIP    uint32
+	ID            uint32      // 房间唯一ID
+	Type          pb.EZooType
+	BetValues     []uint32
+	MaxPlayer     uint32
+	MinVIP        uint32
+	CurrentPlayers uint32      // 当前玩家数
 
 	animals      map[uint32]*AnimalRoute
 	nextAnimalID uint32
@@ -54,13 +66,13 @@ type Room struct {
 // AnimalRoute 房间中动物当前状态
 
 type AnimalRoute struct {
-	ID      uint32
-	Animal  pb.EAnimal
-	LineID  uint32
-	Point   uint32
-	Red     bool
-	State   pb.EAnimalState
-	SpawnAt time.Time
+	ID       uint32
+	Animal   pb.EAnimal
+	LineID   uint32
+	Point    uint32
+	Red      bool
+	State    pb.EAnimalState
+	SpawnAt  time.Time
 }
 
 // PlayerSession 玩家在房间内的实时状态

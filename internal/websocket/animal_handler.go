@@ -37,6 +37,7 @@ type AnimalSession struct {
 	Icon     string
 	VIP      uint32
 	ZooType  pb.EZooType
+	RoomID   uint32      // 玩家所在房间ID
 
 	Conn  *websocket.Conn
 	Codec *ProtobufCodec
@@ -53,11 +54,16 @@ type AnimalHandler struct {
 	manager      *animal.Manager
 	logger       *zap.Logger
 	configHandler *ConfigHandler // 添加配置处理器
+
+	// 动态房间管理系统
+	animalRooms    map[uint32]*animal.AnimalRoom        // roomID -> AnimalRoom
+	roomsByType    map[pb.EZooType][]uint32             // zooType -> roomID list
+	nextRoomID     uint32                              // 下一个房间ID
 }
 
 // NewAnimalHandler 创建处理器
 func NewAnimalHandler(db *gorm.DB, logger *zap.Logger) *AnimalHandler {
-	return &AnimalHandler{
+	h := &AnimalHandler{
 		sessions:       make(map[string]*AnimalSession),
 		playerSessions: make(map[uint32]map[string]*AnimalSession),
 		db:             db,
@@ -65,6 +71,142 @@ func NewAnimalHandler(db *gorm.DB, logger *zap.Logger) *AnimalHandler {
 		manager:        animal.NewManager(),
 		logger:         logger,
 		configHandler:  NewConfigHandler(db, logger), // 初始化配置处理器
+		animalRooms:    make(map[uint32]*animal.AnimalRoom),
+		roomsByType:    make(map[pb.EZooType][]uint32),
+		nextRoomID:     1,
+	}
+
+	// 初始化动物房间系统
+	h.initializeAnimalRooms()
+
+	return h
+}
+
+// initializeAnimalRooms 初始化动物房间
+func (h *AnimalHandler) initializeAnimalRooms() {
+	// 只创建1个默认房间（civilian类型）
+	defaultType := pb.EZooType_civilian
+	roomID := h.nextRoomID
+	h.nextRoomID++
+	
+	// 创建推送回调函数
+	pushCallback := func(msg *animal.PushMessage) {
+		// 设置房间ID
+		msg.RoomID = roomID
+		h.broadcastToRoom(msg)
+	}
+	
+	room := animal.NewAnimalRoom(roomID, defaultType, h.logger, pushCallback)
+	room.Start()
+	
+	h.animalRooms[roomID] = room
+	h.roomsByType[defaultType] = []uint32{roomID}
+
+	h.logger.Info("[AnimalHandler] 初始房间创建完成",
+		zap.Uint32("room_id", roomID),
+		zap.String("room_type", defaultType.String()))
+}
+
+// findOrCreateRoom 查找或创建动态房间
+func (h *AnimalHandler) findOrCreateRoom(zooType pb.EZooType) (*animal.AnimalRoom, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	
+	const MAX_PLAYERS_PER_ROOM = 4
+	
+	// 查找该类型的所有房间
+	roomIDs, exists := h.roomsByType[zooType]
+	if !exists || len(roomIDs) == 0 {
+		// 该类型还没有房间，创建第一个
+		return h.createRoom(zooType), nil
+	}
+	
+	// 查找第一个未满员的房间
+	for _, roomID := range roomIDs {
+		room, ok := h.animalRooms[roomID]
+		if !ok {
+			continue
+		}
+		// 获取房间当前玩家数
+		currentPlayers := room.GetPlayerCount()
+		if currentPlayers < MAX_PLAYERS_PER_ROOM {
+			h.logger.Info("[AnimalHandler] 找到空闲房间",
+				zap.Uint32("room_id", roomID),
+				zap.Uint32("current_players", currentPlayers),
+				zap.String("room_type", zooType.String()))
+			return room, nil
+		}
+	}
+	
+	// 所有房间都满员，创建新房间
+	h.logger.Info("[AnimalHandler] 所有房间已满，创建新房间",
+		zap.String("room_type", zooType.String()))
+	return h.createRoom(zooType), nil
+}
+
+// createRoom 创建新的动物房间
+func (h *AnimalHandler) createRoom(zooType pb.EZooType) *animal.AnimalRoom {
+	roomID := h.nextRoomID
+	h.nextRoomID++
+	
+	// 推送回调函数
+	pushCallback := func(msg *animal.PushMessage) {
+		// 设置房间ID
+		msg.RoomID = roomID
+		h.broadcastToRoom(msg)
+	}
+	
+	room := animal.NewAnimalRoom(roomID, zooType, h.logger, pushCallback)
+	room.Start()
+	
+	// 添加到管理器
+	h.animalRooms[roomID] = room
+	h.roomsByType[zooType] = append(h.roomsByType[zooType], roomID)
+	
+	h.logger.Info("[AnimalHandler] 创建新房间",
+		zap.Uint32("room_id", roomID),
+		zap.String("room_type", zooType.String()))
+	
+	return room
+}
+
+// broadcastToRoom 向房间广播消息
+func (h *AnimalHandler) broadcastToRoom(msg *animal.PushMessage) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, session := range h.sessions {
+		// 检查是否是同一个房间的玩家
+		if session.RoomID == msg.RoomID {
+			// 如果有指定目标玩家，只发送给指定玩家
+			if len(msg.Targets) > 0 {
+				found := false
+				for _, targetID := range msg.Targets {
+					if session.PlayerID == targetID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+
+			// 编码并发送消息
+			data, err := session.Codec.Encode(msg.MsgID, msg.Message)
+			if err != nil {
+				h.logger.Error("[AnimalHandler] 编码广播消息失败",
+					zap.Error(err),
+					zap.Uint16("msg_id", msg.MsgID))
+				continue
+			}
+
+			if err := session.Conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+				h.logger.Error("[AnimalHandler] 发送广播消息失败",
+					zap.Error(err),
+					zap.String("session_id", session.ID))
+			}
+		}
 	}
 }
 
@@ -218,16 +360,38 @@ func (h *AnimalHandler) handleEnterRoom(session *AnimalSession, payload []byte) 
 		// 对于1801请求，通常是空的，所以直接继续处理
 	}
 
-	resp, pushes, err := h.manager.EnterRoom(session.PlayerID, session.Name, session.Icon, session.VIP, req)
+	// 确定房间类型
+	roomType := req.GetType()
+	if roomType == 0 {
+		roomType = pb.EZooType_free // 默认体验场
+	}
+
+	// 使用动态房间管理系统
+	room, err := h.findOrCreateRoom(roomType)
 	if err != nil {
-		h.logger.Error("[AnimalHandler] 进入房间失败", zap.Error(err))
+		h.logger.Error("[AnimalHandler] 查找/创建房间失败", 
+			zap.String("room_type", roomType.String()),
+			zap.Error(err))
 		return
 	}
 
-	session.ZooType = req.GetType()
+	// 调用新的动物房间进入逻辑
+	resp, err := room.EnterRoom(session.PlayerID, session.Name, session.Icon)
+	if err != nil {
+		h.logger.Error("[AnimalHandler] 进入动物房间失败", zap.Error(err))
+		return
+	}
+
+	// 更新会话房间信息
+	session.ZooType = roomType
+	session.RoomID = room.GetRoomID()
 
 	h.sendMessage(session, 1801, resp)
-	h.dispatchPushes(session, pushes)
+
+	h.logger.Info("[AnimalHandler] 玩家进入动物房间",
+		zap.Uint32("player_id", session.PlayerID),
+		zap.String("room_type", roomType.String()),
+		zap.Int("animals_count", len(resp.Animals)))
 }
 
 func (h *AnimalHandler) handleLeaveRoom(session *AnimalSession, payload []byte) {
@@ -237,16 +401,30 @@ func (h *AnimalHandler) handleLeaveRoom(session *AnimalSession, payload []byte) 
 		return
 	}
 
-	resp, pushes, err := h.manager.LeaveRoom(session.PlayerID, req)
-	if err != nil {
-		h.logger.Error("[AnimalHandler] 离开房间失败", zap.Error(err))
-		return
+	// 使用动态房间管理系统
+	if session.RoomID != 0 {
+		h.mu.RLock()
+		room, exists := h.animalRooms[session.RoomID]
+		h.mu.RUnlock()
+		if exists {
+			room.LeaveRoom(session.PlayerID)
+			h.logger.Info("[AnimalHandler] 玩家离开房间",
+				zap.Uint32("player_id", session.PlayerID),
+				zap.Uint32("room_id", session.RoomID),
+				zap.Uint32("current_players", room.GetPlayerCount()))
+		}
 	}
 
+	// 重置会话房间信息
 	session.ZooType = 0
+	session.RoomID = 0
 
+	// 返回简单的确认响应
+	resp := &pb.M_1802Toc{}
 	h.sendMessage(session, 1802, resp)
-	h.dispatchPushes(session, pushes)
+
+	h.logger.Info("[AnimalHandler] 玩家离开动物房间",
+		zap.Uint32("player_id", session.PlayerID))
 }
 
 func (h *AnimalHandler) handleBet(session *AnimalSession, payload []byte) {
