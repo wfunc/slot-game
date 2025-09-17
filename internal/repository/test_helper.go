@@ -115,8 +115,8 @@ func CleanupTestDB(db *gorm.DB) {
 
 // TestDB 创建测试数据库
 func TestDB(t *testing.T) *gorm.DB {
-	// 使用实际的SQLite文件进行测试
-	db, err := gorm.Open(sqlite.Open("../../data/slot-game-test.db"), &gorm.Config{
+	// 使用内存数据库进行测试（更快，不需要文件系统，在所有环境中都能工作）
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
