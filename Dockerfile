@@ -1,5 +1,5 @@
 # 多阶段构建：使用官方Go镜像作为构建环境
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # 安装基本工具
 RUN apk add --no-cache git make
