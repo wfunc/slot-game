@@ -62,7 +62,7 @@ websocket:
 
 # 串口配置
 serial:
-  enabled: true          # 是否启用串口（false时使用模拟控制器）
+  enabled: false          # 是否启用串口（false时使用模拟控制器）
   
   # STM32硬件串口
   stm32:

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Protocol Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .log {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 0 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .connected {
+            color: green;
+        }
+        .disconnected {
+            color: red;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #007bff;
+        }
+        .error {
+            color: red;
+            border-left-color: red;
+        }
+        .success {
+            color: green;
+            border-left-color: green;
+        }
+        .hex-display {
+            font-family: 'Courier New', monospace;
+            background: #f9f9f9;
+            padding: 5px;
+            margin: 5px 0;
+            border: 1px solid #e0e0e0;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Binary Protocol Test</h1>
+
+        <div>
+            <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
+            <p>Endpoint: <span id="endpoint">ws://localhost:8080/ws/binary</span></p>
+        </div>
+
+        <div class="controls">
+            <button onclick="connect()">Connect</button>
+            <button onclick="disconnect()">Disconnect</button>
+            <button onclick="clearLog()">Clear Log</button>
+            <br><br>
+            <h3>Test Commands:</h3>
+            <button onclick="sendCommand(1002, new Uint8Array())">1002 - Heartbeat</button>
+            <button onclick="sendCommand(2099, new Uint8Array())">2099 - Config Query</button>
+            <button onclick="sendCommand(1901, new Uint8Array())">1901 - Enter Room (Slot)</button>
+            <button onclick="sendCommand(1902, new Uint8Array())">1902 - Start Game (Slot)</button>
+            <button onclick="sendCommand(1801, new Uint8Array())">1801 - Enter Zoo (Animal)</button>
+            <button onclick="sendCommand(1802, new Uint8Array())">1802 - Leave Zoo (Animal)</button>
+        </div>
+
+        <h3>Send Log:</h3>
+        <div id="sendLog" class="log"></div>
+
+        <h3>Receive Log:</h3>
+        <div id="receiveLog" class="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageId = 0;
+        let flag = 1;
+
+        function log(type, message, data = null) {
+            const logDiv = document.getElementById(type === 'send' ? 'sendLog' : 'receiveLog');
+            const timestamp = new Date().toLocaleTimeString();
+            let html = `<div class="message">`;
+            html += `<strong>[${timestamp}]</strong> ${message}`;
+
+            if (data) {
+                // 显示hex数据
+                const hexString = Array.from(new Uint8Array(data))
+                    .map(b => b.toString(16).padStart(2, '0'))
+                    .join(' ');
+                html += `<div class="hex-display">HEX: ${hexString}</div>`;
+                html += `<div>Bytes: ${data.byteLength}</div>`;
+            }
+
+            html += `</div>`;
+            logDiv.innerHTML = html + logDiv.innerHTML;
+        }
+
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+
+            const endpoint = document.getElementById('endpoint').textContent;
+            ws = new WebSocket(endpoint);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'connected';
+                log('receive', '✅ WebSocket connected');
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'disconnected';
+                log('receive', '❌ WebSocket disconnected');
+            };
+
+            ws.onerror = (error) => {
+                log('receive', `❌ WebSocket error: ${error}`);
+            };
+
+            ws.onmessage = (event) => {
+                const data = new Uint8Array(event.data);
+                log('receive', `📥 Received message (${data.byteLength} bytes)`, event.data);
+
+                // 解析服务端消息（11字节头）
+                if (data.byteLength >= 11) {
+                    const view = new DataView(event.data);
+                    const errorId = view.getUint16(0, false); // big-endian
+                    const dataSize = view.getUint16(2, false);
+                    const dataStatus = view.getUint8(4);
+                    const flag = view.getUint32(5, false);
+                    const cmd = view.getUint16(9, false);
+
+                    // 特殊处理推送消息
+                    if (cmd === 1887) {
+                        log('receive', '🦁 动物进入推送 (1887)', event.data);
+                    } else if (cmd === 1888) {
+                        log('receive', '🐢 动物离开推送 (1888)', event.data);
+                    }
+
+                    let msgInfo = `<div class="${errorId === 0 ? 'success' : 'error'}">`;
+                    msgInfo += `Parsed: Cmd=${cmd}, Flag=${flag}, ErrorID=${errorId}, DataSize=${dataSize}, DataStatus=${dataStatus}`;
+
+                    if (dataSize > 0 && data.byteLength >= 11 + dataSize) {
+                        const msgData = data.slice(11, 11 + dataSize);
+                        try {
+                            const text = new TextDecoder().decode(msgData);
+                            msgInfo += `<br>Data (text): ${text}`;
+                        } catch (e) {
+                            msgInfo += `<br>Data (binary): ${dataSize} bytes`;
+                        }
+                    }
+                    msgInfo += `</div>`;
+
+                    document.getElementById('receiveLog').innerHTML = msgInfo + document.getElementById('receiveLog').innerHTML;
+                }
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        function sendCommand(cmd, data = new Uint8Array()) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Please connect first!');
+                return;
+            }
+
+            // 构建客户端消息（9字节头 + 数据）
+            const dataSize = data.byteLength;
+            const buffer = new ArrayBuffer(9 + dataSize);
+            const view = new DataView(buffer);
+
+            // 设置消息头
+            view.setUint16(0, dataSize, false); // DataSize (2 bytes, big-endian)
+            view.setUint8(2, 0);                // DataStatus (1 byte)
+            view.setUint32(3, flag++, false);   // Flag (4 bytes, big-endian)
+            view.setUint16(7, cmd, false);      // Cmd (2 bytes, big-endian)
+
+            // 添加数据
+            if (dataSize > 0) {
+                const uint8Array = new Uint8Array(buffer);
+                uint8Array.set(data, 9);
+            }
+
+            ws.send(buffer);
+            log('send', `📤 Sent command ${cmd} (${9 + dataSize} bytes)`, buffer);
+        }
+
+        function clearLog() {
+            document.getElementById('sendLog').innerHTML = '';
+            document.getElementById('receiveLog').innerHTML = '';
+        }
+
+        // 自动连接
+        window.onload = () => {
+            setTimeout(connect, 500);
+        };
+    </script>
+</body>
+</html>

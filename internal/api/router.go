@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/wfunc/slot-game/internal/game"
+	"github.com/wfunc/slot-game/internal/hardware"
 	"github.com/wfunc/slot-game/internal/middleware"
 	"github.com/wfunc/slot-game/internal/repository"
 	"github.com/wfunc/slot-game/internal/service"
@@ -24,13 +25,14 @@ type Router struct {
 	serialLogHandler  *SerialLogAPI
 	wsHandler         *WebSocketHandler
 	protobufWsHandler *ProtobufWebSocketHandler
+	binaryWsHandler   *BinaryWebSocketHandler
 	wsHub             *ws.Hub
 	authMiddleware    *middleware.AuthMiddleware
 	log               *zap.Logger
 }
 
 // NewRouter 创建路由器
-func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
+func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger, serialController hardware.HardwareController) *Router {
 	// 创建Gin引擎
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -44,10 +46,11 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 
 	// 创建游戏服务
 	gameServiceConfig := &game.GameServiceConfig{
-		DB:             db,
-		Logger:         log,
-		SessionTimeout: 30 * time.Minute,
-		MaxSessions:    1000,
+		DB:               db,
+		Logger:           log,
+		SessionTimeout:   30 * time.Minute,
+		MaxSessions:      1000,
+		SerialController: serialController, // 传递串口控制器
 	}
 	gameService := game.NewGameService(gameServiceConfig)
 
@@ -64,6 +67,7 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 	authHandler := NewAuthHandler(services.Auth, services.User)
 	wsHandler := NewWebSocketHandler(wsHub, log)
 	protobufWsHandler := NewProtobufWebSocketHandler(db, log)
+	binaryWsHandler := NewBinaryWebSocketHandler(db, log)
 	slotHandler := NewSlotHandler(gameService, repository.NewWalletRepository(db), wsHandler, log)
 	walletHandler := NewWalletHandler(db, log)
 
@@ -84,6 +88,7 @@ func NewRouter(db *gorm.DB, config *service.Config, log *zap.Logger) *Router {
 		serialLogHandler:  serialLogHandler,
 		wsHandler:         wsHandler,
 		protobufWsHandler: protobufWsHandler,
+		binaryWsHandler:   binaryWsHandler,
 		wsHub:             wsHub,
 		authMiddleware:    authMiddleware,
 		log:               log,
@@ -195,6 +200,7 @@ func (r *Router) setupRoutes() {
 	// WebSocket使用JWT认证，但不需要通过中间件
 	{
 		ws.GET("/game", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的游戏（支持slot和animal）
+		ws.GET("/binary", r.binaryWsHandler.HandleBinaryConnection)   // 前端二进制协议格式
 		ws.GET("/online", r.wsHandler.GetOnlineCount)
 		ws.GET("/slot", r.protobufWsHandler.HandleProtobufConnection) // Protobuf格式的老虎机游戏（保持兼容）
 	}

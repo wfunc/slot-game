@@ -162,28 +162,28 @@ func (s *Server) Start() error {
 // initComponents 初始化组件
 func (s *Server) initComponents() error {
 	s.logger.Info("初始化组件...")
-	
+
 	// 初始化数据库
 	if err := s.initDatabase(); err != nil {
 		return err
 	}
-	
-	// 初始化HTTP路由
-	if err := s.initHTTPRouter(); err != nil {
-		return err
-	}
-	
-	// 初始化游戏引擎和恢复管理器
-	if err := s.initGameEngine(); err != nil {
-		return err
-	}
-	
-	// 初始化串口管理器（可选）
+
+	// 初始化串口管理器（可选，需要在路由之前初始化）
 	if s.cfg.Serial.Enabled {
 		if err := s.initSerialManager(); err != nil {
 			s.logger.Warn("串口管理器初始化失败，使用模拟模式", zap.Error(err))
 			// 不影响主流程，继续运行
 		}
+	}
+
+	// 初始化HTTP路由（依赖串口控制器）
+	if err := s.initHTTPRouter(); err != nil {
+		return err
+	}
+
+	// 初始化游戏引擎和恢复管理器
+	if err := s.initGameEngine(); err != nil {
+		return err
 	}
 	
 	// TODO: 初始化MQTT客户端
@@ -239,9 +239,9 @@ func (s *Server) initHTTPRouter() error {
 		AccessTokenExpiry:  time.Duration(s.cfg.Security.JWT.ExpireHours) * time.Hour,
 		RefreshTokenExpiry: time.Duration(s.cfg.Security.JWT.RefreshHours) * time.Hour,
 	}
-	
-	// 创建路由器
-	s.router = api.NewRouter(db, serviceConfig, s.logger)
+
+	// 创建路由器（传递串口控制器）
+	s.router = api.NewRouter(db, serviceConfig, s.logger, s.serialController)
 	
 	// 创建HTTP服务器
 	s.httpServer = &http.Server{

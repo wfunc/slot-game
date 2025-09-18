@@ -55,17 +55,38 @@ func (c *ProtobufCodec) Decode(data []byte) (uint16, []byte, error) {
 	if len(data) < 6 {
 		return 0, nil, fmt.Errorf("data too short: %d bytes", len(data))
 	}
-	
+
+	// 打印接收到的原始数据（前20字节）
+	debugLen := len(data)
+	if debugLen > 20 {
+		debugLen = 20
+	}
+	fmt.Printf("[ProtobufCodec] 接收到原始数据 (前%d字节): % x\n", debugLen, data[:debugLen])
+	fmt.Printf("[ProtobufCodec] 总长度: %d字节\n", len(data))
+
 	reader := bytes.NewReader(data)
-	
+
 	// 读取长度（4字节）
 	var length uint32
 	if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
 		return 0, nil, fmt.Errorf("read length failed: %w", err)
 	}
-	
+
+	fmt.Printf("[ProtobufCodec] 解析的长度字段: %d (0x%08x)\n", length, length)
+
 	// 验证长度
 	if int(length)+4 != len(data) {
+		// 可能是前端的二进制协议格式，尝试解析
+		fmt.Printf("[ProtobufCodec] 长度不匹配，可能是前端二进制协议\n")
+		if len(data) >= 9 {
+			// 尝试解析前端协议头
+			dataSize := binary.BigEndian.Uint16(data[0:2])
+			dataStatus := data[2]
+			flag := binary.BigEndian.Uint32(data[3:7])
+			cmd := binary.BigEndian.Uint16(data[7:9])
+			fmt.Printf("[ProtobufCodec] 前端协议解析: DataSize=%d, DataStatus=%d, Flag=%d, Cmd=%d\n",
+				dataSize, dataStatus, flag, cmd)
+		}
 		return 0, nil, fmt.Errorf("length mismatch: expected %d, got %d", length+4, len(data))
 	}
 	
