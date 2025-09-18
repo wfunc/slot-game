@@ -399,6 +399,8 @@ func (c *ACMController) readLoop() {
 
 	buffer := make([]byte, 1024)
 	var msgBuffer string
+	var jsonBuffer string // 专门用于累积JSON消息的缓冲区
+	var inJSONMessage bool // 标记是否正在接收JSON消息
 
 	for {
 		select {
@@ -446,44 +448,85 @@ func (c *ACMController) readLoop() {
 				msgBuffer += receivedData
 
 				// 打印原始接收数据（十六进制和ASCII）
-				c.logger.Debug("ACM接收原始数据",
+				c.logger.Debug("ACM接收原始数据片段",
 					zap.String("ascii", receivedData),
 					zap.String("hex", fmt.Sprintf("% X", buffer[:n])),
-					zap.Int("bytes", n))
+					zap.Int("bytes", n),
+					zap.Bool("inJSON", inJSONMessage))
 
-				// 记录到数据库
-				if c.serialLogService != nil {
-					requestID := c.serialLogService.GenerateRequestID()
-					c.serialLogService.LogACMReceive(receivedData, fmt.Sprintf("% X", buffer[:n]), nil, requestID)
-				}
-
-				// 处理完整的消息（以\n或\r\n结尾）
+				// 检查是否包含完整的消息终止符 "\nend\n>"
 				for {
-					idx := strings.Index(msgBuffer, "\n")
-					if idx == -1 {
-						break
-					}
+					// 如果正在接收JSON消息，查找结束标记
+					if inJSONMessage {
+						// 查找消息结束标记 "\nend\n>"
+						endIdx := strings.Index(msgBuffer, "\nend\n>")
+						if endIdx != -1 {
+							// 找到了结束标记，提取完整的JSON消息
+							jsonBuffer += msgBuffer[:endIdx]
+							msgBuffer = msgBuffer[endIdx+7:] // 跳过 "\nend\n>"
 
-					msg := strings.TrimSpace(msgBuffer[:idx])
-					msgBuffer = msgBuffer[idx+1:]
+							// 处理完整的JSON消息
+							jsonMsg := strings.TrimSpace(jsonBuffer)
+							if jsonMsg != "" {
+								c.logger.Info("ACM完整JSON消息",
+									zap.String("message", jsonMsg),
+									zap.Int("length", len(jsonMsg)))
 
-					if msg != "" {
-						// 跳过 "end" 和 ">" 标记
-						if msg == "end" || msg == ">" {
-							c.logger.Debug("收到结束标记", zap.String("marker", msg))
-							continue
-						}
+								// 记录完整消息到数据库
+								if c.serialLogService != nil {
+									requestID := c.serialLogService.GenerateRequestID()
+									c.serialLogService.LogACMReceive(jsonMsg,
+										fmt.Sprintf("% X", []byte(jsonMsg)), nil, requestID)
+								}
 
-						// 记录所有消息，帮助了解ACM设备的响应格式
-						if strings.Contains(msg, "help") || strings.Contains(msg, "Help") ||
-							strings.Contains(msg, "command") || strings.Contains(msg, "Command") {
-							c.logger.Info("ACM帮助信息", zap.String("message", msg))
-						} else if strings.HasPrefix(msg, "{") && strings.HasSuffix(msg, "}") {
-							c.logger.Info("ACM JSON响应", zap.String("message", msg))
+								c.processMessage(jsonMsg)
+							}
+
+							// 清空JSON缓冲区，退出JSON消息模式
+							jsonBuffer = ""
+							inJSONMessage = false
 						} else {
-							c.logger.Debug("ACM接收消息", zap.String("message", msg))
+							// 还没有找到结束标记，继续累积
+							jsonBuffer += msgBuffer
+							msgBuffer = ""
+							break // 等待更多数据
 						}
-						c.processMessage(msg)
+					} else {
+						// 不在JSON消息中，查找JSON消息的开始
+						startIdx := strings.Index(msgBuffer, "{\"")
+						if startIdx != -1 {
+							// 处理JSON之前的普通消息
+							if startIdx > 0 {
+								preMsg := msgBuffer[:startIdx]
+								lines := strings.Split(preMsg, "\n")
+								for _, line := range lines {
+									line = strings.TrimSpace(line)
+									if line != "" && line != "end" && line != ">" {
+										c.logger.Debug("ACM普通消息", zap.String("message", line))
+										c.processMessage(line)
+									}
+								}
+							}
+
+							// 开始JSON消息模式
+							inJSONMessage = true
+							jsonBuffer = msgBuffer[startIdx:]
+							msgBuffer = ""
+						} else {
+							// 没有JSON消息，处理普通的行消息
+							idx := strings.Index(msgBuffer, "\n")
+							if idx == -1 {
+								break // 没有完整的行，等待更多数据
+							}
+
+							msg := strings.TrimSpace(msgBuffer[:idx])
+							msgBuffer = msgBuffer[idx+1:]
+
+							if msg != "" && msg != "end" && msg != ">" {
+								c.logger.Debug("ACM普通消息", zap.String("message", msg))
+								c.processMessage(msg)
+							}
+						}
 					}
 				}
 			}

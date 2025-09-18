@@ -16,6 +16,7 @@ import (
 type ProtobufWebSocketHandler struct {
 	slotHandler     *ws.SlotHandler
 	animalHandler   *ws.AnimalHandler
+	bridgeHandler   *ws.BridgeHandler
 	// unifiedHandler  *ws.UnifiedHandler // 统一处理器 (暂时注释，等待完善)
 	upgrader        websocket.Upgrader
 	logger          *zap.Logger
@@ -23,9 +24,19 @@ type ProtobufWebSocketHandler struct {
 
 // NewProtobufWebSocketHandler 创建protobuf WebSocket处理器
 func NewProtobufWebSocketHandler(db *gorm.DB, logger *zap.Logger) *ProtobufWebSocketHandler {
+	// 创建handlers
+	slotHandler := ws.NewSlotHandler(db)
+	animalHandler := ws.NewAnimalHandler(db, logger)
+	bridgeHandler := ws.NewBridgeHandler(logger, db)
+
+	// 注册游戏处理器到桥接处理器
+	bridgeHandler.RegisterGameHandler("slot", slotHandler)
+	bridgeHandler.RegisterGameHandler("animal", animalHandler)
+
 	return &ProtobufWebSocketHandler{
-		slotHandler:     ws.NewSlotHandler(db),
-		animalHandler:   ws.NewAnimalHandler(db, logger),
+		slotHandler:     slotHandler,
+		animalHandler:   animalHandler,
+		bridgeHandler:   bridgeHandler,
 		// unifiedHandler:  ws.NewUnifiedHandler(db, logger), // 创建统一处理器 (暂时注释)
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,

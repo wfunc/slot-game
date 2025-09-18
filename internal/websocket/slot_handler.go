@@ -128,6 +128,29 @@ func (h *SlotHandler) HandleConnection(conn *websocket.Conn) {
 	log.Printf("[SlotHandler] 玩家断开连接: %s", sessionID)
 }
 
+// DisconnectPlayer 断开指定玩家的所有连接
+func (h *SlotHandler) DisconnectPlayer(playerID uint32) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// 查找并断开该玩家的所有会话
+	for sessionID, session := range h.sessions {
+		if session.UserID == uint(playerID) {
+			h.logger.Info("[SlotHandler] 断开玩家连接",
+				zap.Uint32("player_id", playerID),
+				zap.String("session_id", sessionID))
+
+			// 关闭WebSocket连接
+			if session.Conn != nil {
+				session.Conn.Close()
+			}
+
+			// 删除会话
+			delete(h.sessions, sessionID)
+		}
+	}
+}
+
 // handleMessages 处理客户端消息
 func (h *SlotHandler) handleMessages(session *SlotSessionSimple) {
 	defer session.Conn.Close()

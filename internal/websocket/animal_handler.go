@@ -82,6 +82,34 @@ func NewAnimalHandler(db *gorm.DB, logger *zap.Logger) *AnimalHandler {
 	return h
 }
 
+// Cleanup 清理资源和停止所有房间
+func (h *AnimalHandler) Cleanup() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// 停止所有房间
+	for roomID, room := range h.animalRooms {
+		h.logger.Info("[停止动物房间]",
+			zap.Uint32("room_id", roomID))
+		room.Stop()
+	}
+
+	// 清理房间映射
+	h.animalRooms = make(map[uint32]*animal.AnimalRoom)
+	h.roomsByType = make(map[pb.EZooType][]uint32)
+
+	// 关闭所有会话
+	for sessionID, session := range h.sessions {
+		if session.Conn != nil {
+			session.Conn.Close()
+		}
+		delete(h.sessions, sessionID)
+	}
+
+	// 清理玩家会话映射
+	h.playerSessions = make(map[uint32]map[string]*AnimalSession)
+}
+
 // initializeAnimalRooms 初始化动物房间
 func (h *AnimalHandler) initializeAnimalRooms() {
 	// 只创建1个默认房间（civilian类型）
@@ -350,6 +378,34 @@ func (h *AnimalHandler) cleanupSession(session *AnimalSession) {
 	h.logger.Info("[AnimalHandler] 连接关闭",
 		zap.String("session_id", session.ID),
 		zap.Uint32("player_id", session.PlayerID))
+}
+
+// DisconnectPlayer 断开指定玩家的所有连接
+func (h *AnimalHandler) DisconnectPlayer(playerID uint32) {
+	h.mu.Lock()
+	sessions := h.playerSessions[playerID]
+	h.mu.Unlock()
+
+	if sessions == nil || len(sessions) == 0 {
+		h.logger.Debug("[AnimalHandler] 玩家没有活跃连接",
+			zap.Uint32("player_id", playerID))
+		return
+	}
+
+	// 关闭该玩家的所有会话
+	for sessionID, session := range sessions {
+		h.logger.Info("[AnimalHandler] 断开玩家连接",
+			zap.Uint32("player_id", playerID),
+			zap.String("session_id", sessionID))
+
+		// 关闭WebSocket连接
+		if session.Conn != nil {
+			session.Conn.Close()
+		}
+
+		// 清理会话
+		h.cleanupSession(session)
+	}
 }
 
 func (h *AnimalHandler) handleEnterRoom(session *AnimalSession, payload []byte) {
