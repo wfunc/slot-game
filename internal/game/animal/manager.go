@@ -17,6 +17,7 @@ var (
 	ErrVIPRequirement    = errors.New("animal: vip requirement not met")
 	ErrSkillUnavailable  = errors.New("animal: skill unavailable")
 	ErrInsufficientFunds = errors.New("animal: insufficient balance")
+	ErrPlayerNotInRoom   = errors.New("animal: player not in room")
 )
 
 var defaultBetValues = map[pb.EZooType][]uint32{
@@ -77,7 +78,7 @@ func NewManager() *Manager {
 	for zooType, bets := range defaultBetValues {
 		roomID := m.nextRoomID
 		m.nextRoomID++
-		
+
 		room := &Room{
 			ID:             roomID,
 			Type:           zooType,
@@ -88,7 +89,7 @@ func NewManager() *Manager {
 			animals:        make(map[uint32]*AnimalRoute),
 			nextAnimalID:   1,
 			players:        make(map[uint32]*PlayerSession),
-			jackpot:        5000000,
+			jackpot:        nil,
 			redBag:         true,
 		}
 
@@ -110,14 +111,14 @@ func NewManager() *Manager {
 // 如果所有房间都满员，创建新房间
 func (m *Manager) FindOrCreateRoom(zooType pb.EZooType) (*Room, error) {
 	// 注意：此方法应该在调用者已经持有锁的情况下调用
-	
+
 	// 查找该类型的所有房间
 	roomIDs, exists := m.roomsByType[zooType]
 	if !exists || len(roomIDs) == 0 {
 		// 该类型还没有房间，创建第一个
 		return m.createRoom(zooType)
 	}
-	
+
 	// 查找第一个未满员的房间
 	for _, roomID := range roomIDs {
 		room, ok := m.rooms[roomID]
@@ -129,7 +130,7 @@ func (m *Manager) FindOrCreateRoom(zooType pb.EZooType) (*Room, error) {
 			return room, nil
 		}
 	}
-	
+
 	// 所有房间都满员，创建新房间
 	return m.createRoom(zooType)
 }
@@ -141,10 +142,10 @@ func (m *Manager) createRoom(zooType pb.EZooType) (*Room, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown zoo type: %v", zooType)
 	}
-	
+
 	roomID := m.nextRoomID
 	m.nextRoomID++
-	
+
 	room := &Room{
 		ID:             roomID,
 		Type:           zooType,
@@ -155,24 +156,26 @@ func (m *Manager) createRoom(zooType pb.EZooType) (*Room, error) {
 		animals:        make(map[uint32]*AnimalRoute),
 		nextAnimalID:   1,
 		players:        make(map[uint32]*PlayerSession),
-		jackpot:        5000000,
+		jackpot:        NewJackpotPool(),     // 初始化彩金池
+		taskManager:    NewTaskManager(),     // 初始化任务管理器
+		oneBlowManager: NewOneBlowManager(),  // 初始化一击必杀管理器
+		profitControl:  &RoomProfitControl{TotalBet: 0, TotalWin: 0}, // 初始化盈亏控制
 		redBag:         true,
 	}
-	
+
 	// 初始生成动物
-	for i := 0; i < 10; i++ {
-		animal := defaultAnimalOrder[i%len(defaultAnimalOrder)]
+	for _, animal := range defaultAnimalOrder {
 		room.spawnAnimal(animal, m.rand)
 	}
-	
+
 	// 添加到管理器
 	m.rooms[roomID] = room
 	m.roomsByType[zooType] = append(m.roomsByType[zooType], roomID)
-	
+
 	// 记录日志
-	log.Printf("[Manager] 创建新房间: ID=%d, Type=%v, MaxPlayers=%d", 
+	log.Printf("[Manager] 创建新房间: ID=%d, Type=%v, MaxPlayers=%d",
 		roomID, zooType, room.MaxPlayer)
-	
+
 	return room, nil
 }
 
@@ -220,7 +223,7 @@ func (m *Manager) EnterRoom(playerID uint32, name, icon string, vip uint32, req 
 
 		room.players[playerID] = session
 		room.CurrentPlayers++
-		log.Printf("[Manager] 玩家 %d 进入房间 %d，当前人数 %d/%d", 
+		log.Printf("[Manager] 玩家 %d 进入房间 %d，当前人数 %d/%d",
 			playerID, room.ID, room.CurrentPlayers, room.MaxPlayer)
 	} else {
 		session.Player = player
@@ -291,7 +294,7 @@ func (m *Manager) LeaveRoom(playerID uint32, req *pb.M_1802Tos) (*pb.M_1802Toc, 
 			total := clampUint32(session.TotalWin)
 			delete(room.players, playerID)
 			room.CurrentPlayers--
-			log.Printf("[Manager] 玩家 %d 离开房间 %d，当前人数 %d/%d", 
+			log.Printf("[Manager] 玩家 %d 离开房间 %d，当前人数 %d/%d",
 				playerID, room.ID, room.CurrentPlayers, room.MaxPlayer)
 
 			push := PushMessage{
@@ -310,7 +313,7 @@ func (m *Manager) LeaveRoom(playerID uint32, req *pb.M_1802Tos) (*pb.M_1802Toc, 
 	return &pb.M_1802Toc{TotalWin: proto.Uint32(0)}, nil, nil
 }
 
-// Bet 玩家下注
+// Bet 玩家下注（兼容旧版本，无子弹系统）
 func (m *Manager) Bet(playerID uint32, req *pb.M_1803Tos) (*pb.M_1803Toc, []PushMessage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -762,6 +765,130 @@ func (r *Room) nextSkillExpiry(ends map[pb.EAnimalSkillType]time.Time) uint32 {
 		return 0
 	}
 	return uint32(min.Seconds())
+}
+
+// BetWithBullet 使用子弹进行下注
+func (m *Manager) BetWithBullet(playerID uint32, targetID uint32, betVal uint32, multiple uint32) (*pb.M_1803Toc, []PushMessage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room := m.findRoomByPlayer(playerID)
+	if room == nil {
+		return nil, nil, ErrRoomNotFound
+	}
+
+	session := room.players[playerID]
+	if session == nil {
+		return nil, nil, ErrPlayerNotInRoom
+	}
+
+	// 获取目标动物
+	target := room.animals[targetID]
+	if target == nil {
+		return nil, nil, fmt.Errorf("目标动物不存在: %d", targetID)
+	}
+
+	// 使用房间的ProcessBet方法进行处理
+	outcome := room.ProcessBet(session, targetID, betVal, multiple)
+
+	// 处理结果
+	if outcome.WinAmount > 0 {
+		session.Player.Balance += uint64(outcome.WinAmount)
+		session.TotalWin += uint64(outcome.WinAmount)
+	}
+
+	// 构建响应
+	resp := &pb.M_1803Toc{
+		Win:      proto.Uint32(outcome.WinAmount),
+		RedBag:   proto.Uint32(outcome.RedBag),
+		Balance:  proto.Uint64(session.Player.Balance),
+		TotalWin: proto.Uint64(session.TotalWin),
+	}
+
+	// 如果有技能获得
+	if len(outcome.SkillGain) > 0 {
+		resp.Skill = outcome.SkillGain
+	}
+
+	// 如果有彩金赢取
+	if outcome.JackpotWin > 0 {
+		resp.Balance = proto.Uint64(session.Player.Balance + outcome.JackpotWin)
+	}
+
+	// 如果是体验场，设置体验币
+	if room.Type == pb.EZooType_free && outcome.FreeGold > 0 {
+		resp.FreeGold = proto.Uint64(outcome.FreeGold)
+	}
+
+	// 构建推送消息
+	pushes := m.buildBetPushesWithOutcome(room, session, targetID, outcome)
+
+	return resp, pushes, nil
+}
+
+// buildBetPushesWithOutcome 根据实际结果构建推送消息
+func (m *Manager) buildBetPushesWithOutcome(room *Room, session *PlayerSession, targetID uint32, outcome *BetOutcome) []PushMessage {
+	pushes := []PushMessage{}
+
+	// 推送玩家打动物
+	pushes = append(pushes, PushMessage{
+		MsgID:   1899,
+		ZooType: room.Type,
+		Targets: room.otherPlayerIDs(session.Player.ID),
+		Message: &pb.M_1899Toc{
+			RoleId: proto.Uint32(session.Player.ID),
+			Id:     proto.Uint32(targetID),
+		},
+	})
+
+	// 推送动物死亡
+	if len(outcome.KilledRoutes) > 0 {
+		killedAnimals := make([]*pb.PAnimalOne, 0, len(outcome.KilledRoutes))
+		for _, killed := range outcome.KilledRoutes {
+			killedAnimals = append(killedAnimals, &pb.PAnimalOne{
+				Id:     proto.Uint32(killed.ID),
+				Win:    proto.Uint32(0), // 可以根据实际赢得金额填充
+				RedBag: proto.Uint32(0), // 可以根据实际红包金额填充
+			})
+		}
+
+		pushes = append(pushes, PushMessage{
+			MsgID:   1884,
+			ZooType: room.Type,
+			Targets: nil, // 广播给房间所有人
+			Message: &pb.M_1884Toc{
+				RoleId: proto.Uint32(session.Player.ID),
+				Type:   outcome.EffectType.Enum(),
+				Ids:    killedAnimals,
+			},
+		})
+
+		// 推送动物离开
+		for _, killed := range outcome.KilledRoutes {
+			pushes = append(pushes, PushMessage{
+				MsgID:   1888,
+				ZooType: room.Type,
+				Targets: nil,
+				Message: &pb.M_1888Toc{
+					Id: proto.Uint32(killed.ID),
+				},
+			})
+		}
+	}
+
+	// 推送彩金中奖
+	if outcome.JackpotWin > 0 {
+		pushes = append(pushes, PushMessage{
+			MsgID:   1811,
+			ZooType: room.Type,
+			Targets: nil,
+			Message: &pb.M_1811Toc{
+				Bonus: proto.String(fmt.Sprintf("%d", outcome.JackpotWin)),
+			},
+		})
+	}
+
+	return pushes
 }
 
 func (m *Manager) simulateBetOutcome(room *Room, target *AnimalRoute, betVal uint32) BetOutcome {

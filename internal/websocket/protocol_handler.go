@@ -138,9 +138,10 @@ func (c *ProtocolClient) readPump() {
 					zap.Int("data_len", len(response.Data)))
 
 				if len(response.Data) > 0 {
-					c.logger.Info("[3.1] 响应Data内容（发送前）",
+					// 打印二进制数据的十六进制表示（protobuf是二进制格式）
+					c.logger.Debug("[3.1] 响应Data内容（protobuf二进制）",
 						zap.String("data_hex", fmt.Sprintf("%x", response.Data)),
-						zap.String("data_string", string(response.Data)))
+						zap.Int("data_len", len(response.Data)))
 				}
 
 				c.SendMessage(response)

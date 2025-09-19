@@ -9,6 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// SkillType 技能类型（临时定义，解决编译问题）
+type SkillType int
+
 // MessageBatcher 消息批量处理器
 type MessageBatcher struct {
 	// 批次缓存

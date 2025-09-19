@@ -54,6 +54,7 @@ type AnimalHandler struct {
 	manager      *animal.Manager
 	logger       *zap.Logger
 	configHandler *ConfigHandler // 添加配置处理器
+	bulletManager *animal.BulletManager // 子弹管理器
 
 	// 动态房间管理系统
 	animalRooms    map[uint32]*animal.AnimalRoom        // roomID -> AnimalRoom
@@ -71,6 +72,7 @@ func NewAnimalHandler(db *gorm.DB, logger *zap.Logger) *AnimalHandler {
 		manager:        animal.NewManager(),
 		logger:         logger,
 		configHandler:  NewConfigHandler(db, logger), // 初始化配置处理器
+		bulletManager:  animal.NewBulletManager(),    // 初始化子弹管理器
 		animalRooms:    make(map[uint32]*animal.AnimalRoom),
 		roomsByType:    make(map[pb.EZooType][]uint32),
 		nextRoomID:     1,
@@ -491,7 +493,46 @@ func (h *AnimalHandler) handleBet(session *AnimalSession, payload []byte) {
 		// 对于1803请求，通常是空的或包含简单下注信息，继续处理
 	}
 
-	resp, pushes, err := h.manager.Bet(session.PlayerID, req)
+	// 获取目标动物ID
+	targetID := req.GetId()
+	if targetID == 0 {
+		h.logger.Warn("[AnimalHandler] 无效的动物ID", zap.Uint32("target_id", targetID))
+		return
+	}
+
+	// 获取或使用子弹
+	var bullet *animal.Bullet
+	var err error
+
+	if bulletID := req.GetBulletId(); bulletID != "" {
+		// 使用指定的子弹
+		bullet, err = h.bulletManager.UseBullet(bulletID)
+		if err != nil {
+			h.logger.Warn("[AnimalHandler] 子弹无效",
+				zap.String("bullet_id", bulletID),
+				zap.Error(err))
+			return
+		}
+	} else {
+		// 使用玩家最旧的子弹（FIFO）
+		bullet, err = h.bulletManager.UseOldestPlayerBullet(session.PlayerID)
+		if err != nil {
+			h.logger.Warn("[AnimalHandler] 玩家没有可用子弹",
+				zap.Uint32("player_id", session.PlayerID),
+				zap.Error(err))
+			return
+		}
+	}
+
+	h.logger.Info("[AnimalHandler] 使用子弹攻击",
+		zap.String("bullet_id", bullet.ID),
+		zap.Uint32("target_id", targetID),
+		zap.Uint32("bet_value", bullet.BetValue),
+		zap.Uint32("multiple", bullet.Multiple))
+
+	// 调用manager进行实际的下注处理
+	// 注意：这里需要修改manager.Bet方法来接受子弹信息
+	resp, pushes, err := h.manager.BetWithBullet(session.PlayerID, targetID, bullet.BetValue, bullet.Multiple)
 	if err != nil {
 		h.logger.Error("[AnimalHandler] 下注失败", zap.Error(err))
 		return
@@ -608,11 +649,14 @@ func (h *AnimalHandler) handleFireBullet(session *AnimalSession, payload []byte)
 		// 尝试作为JSON处理（测试客户端使用）
 		h.logger.Debug("[AnimalHandler] Protobuf解析失败，尝试JSON格式", zap.Error(err))
 		// 对于1815请求，默认使用最小下注值
-		req.BetVal = proto.Uint32(1)
+		req.BetVal = proto.Uint32(100)
 	}
 
 	// 获取下注金额
 	betVal := req.GetBetVal()
+	if betVal == 0 {
+		betVal = 100 // 默认最小下注值
+	}
 
 	// 扣除金币
 	wallet, err := h.walletRepo.GetByUserID(context.Background(), session.UserID)
@@ -637,21 +681,22 @@ func (h *AnimalHandler) handleFireBullet(session *AnimalSession, payload []byte)
 	// 更新本地钱包余额以便返回正确的余额
 	wallet.Coins -= int64(betVal)
 
-	// 生成子弹ID
-	bulletID := uuid.New().String()
+	// 使用子弹管理器创建子弹
+	bullet := h.bulletManager.CreateBullet(session.PlayerID, betVal, 1) // 默认倍数为1
 
 	// 构造响应
 	resp := &pb.M_1815Toc{
-		BulletId: proto.String(bulletID),
+		BulletId: proto.String(bullet.ID),
 		Balance:  proto.Uint64(uint64(wallet.Coins)),
 	}
 
 	h.sendMessage(session, 1815, resp)
 
 	h.logger.Info("[AnimalHandler] 发射子弹",
-		zap.String("bullet_id", bulletID),
+		zap.String("bullet_id", bullet.ID),
 		zap.Uint32("bet_val", betVal),
-		zap.Int64("balance", wallet.Coins))
+		zap.Int64("balance", wallet.Coins),
+		zap.Int("bullet_count", h.bulletManager.GetBulletCount(session.PlayerID)))
 }
 
 func (h *AnimalHandler) sendMessage(session *AnimalSession, msgID uint16, msg proto.Message) {

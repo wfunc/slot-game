@@ -3,6 +3,7 @@ package websocket
 import (
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/wfunc/slot-game/internal/game/animal"
 	"github.com/wfunc/slot-game/internal/pb"
 	"go.uber.org/zap"
@@ -127,6 +128,8 @@ func (r *BinaryProtocolRouter) routeToAnimalHandler(client *ProtocolClient, msg 
 		return r.handleAnimalLeaveRoom(client, msg)
 	case 1803: // 下注
 		return r.handleAnimalBet(client, msg)
+	case 1815: // 发射子弹
+		return r.handleAnimalFireBullet(client, msg)
 	default:
 		// 其他命令暂时返回空响应
 		response := &ServerMessage{
@@ -376,19 +379,139 @@ func (r *BinaryProtocolRouter) handleAnimalLeaveRoom(client *ProtocolClient, msg
 	return response, nil
 }
 
-// handleAnimalBet 处理下注
+// handleAnimalBet 处理下注（子弹击中动物）
 func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *ClientMessage) (*ServerMessage, error) {
-	r.logger.Info("[路由] 处理1803命令 - 下注",
+	r.logger.Info("[路由] 处理1803命令 - 下注（子弹击中）",
 		zap.String("client_id", client.ID),
 		zap.Int("data_len", len(msg.Data)))
+
+	// 解析请求
+	req := &pb.M_1803Tos{}
+	if err := proto.Unmarshal(msg.Data, req); err != nil {
+		r.logger.Error("[路由] 解析1803请求失败", zap.Error(err))
+		return nil, err
+	}
+
+	animalID := req.GetId()
+	bulletID := req.GetBulletId()
+
+	r.logger.Info("[路由] 子弹击中动物",
+		zap.Uint32("animal_id", animalID),
+		zap.String("bullet_id", bulletID))
+
+	// 模拟游戏结果（实际应该调用游戏逻辑）
+	// 随机生成结果
+	isHit := animalID%2 == 0 // 偶数ID的动物被击中
+	winAmount := uint32(0)
+	redBagAmount := uint32(0)
+
+	if isHit {
+		winAmount = 100 * (1 + animalID%5) // 根据动物ID生成赢取金额
+		if animalID%10 == 0 {
+			redBagAmount = 10 // 10%概率获得红包
+		}
+	}
+
+	// 模拟玩家余额（实际应该从数据库获取）
+	currentBalance := uint64(999900)
+	if winAmount > 0 {
+		currentBalance += uint64(winAmount)
+	}
+
+	// 构造响应
+	respProto := &pb.M_1803Toc{
+		Balance:  proto.Uint64(currentBalance),        // required: 当前余额
+		Win:      proto.Uint32(winAmount),             // required: 赢得金额
+		RedBag:   proto.Uint32(redBagAmount),          // required: 红包金额
+		TotalWin: proto.Uint64(uint64(winAmount)),     // required: 累计赢取
+		// Skill 和 FreeGold 是可选的，暂时不填
+	}
+
+	// 序列化protobuf
+	responseData, err := proto.Marshal(respProto)
+	if err != nil {
+		r.logger.Error("[路由] 序列化1803响应失败", zap.Error(err))
+		return nil, err
+	}
 
 	response := &ServerMessage{
 		ErrorID:    0,  // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
-		Data:       []byte{},
+		Data:       responseData,
 	}
+
+	r.logger.Info("[路由] 下注响应准备完毕",
+		zap.Uint16("cmd", response.Cmd),
+		zap.Uint32("flag", response.Flag),
+		zap.Int("data_len", len(response.Data)),
+		zap.Uint32("animal_id", animalID),
+		zap.Uint32("win", winAmount),
+		zap.Uint32("red_bag", redBagAmount),
+		zap.Uint64("balance", currentBalance))
+
+	// 如果击中，推送动物死亡消息（可选）
+	if isHit && winAmount > 0 {
+		// 这里可以通过PushManager推送1884消息（动物死亡）
+		// 暂时跳过推送逻辑
+	}
+
+	return response, nil
+}
+
+// handleAnimalFireBullet 处理发射子弹
+func (r *BinaryProtocolRouter) handleAnimalFireBullet(client *ProtocolClient, msg *ClientMessage) (*ServerMessage, error) {
+	r.logger.Info("[路由] 处理1815命令 - 发射子弹",
+		zap.String("client_id", client.ID),
+		zap.Int("data_len", len(msg.Data)))
+
+	// 解析请求
+	req := &pb.M_1815Tos{}
+	if err := proto.Unmarshal(msg.Data, req); err != nil {
+		r.logger.Error("[路由] 解析1815请求失败", zap.Error(err))
+		// 使用默认值
+		req.BetVal = proto.Uint32(100)
+	}
+
+	betVal := req.GetBetVal()
+	if betVal == 0 {
+		betVal = 100
+	}
+
+	// 生成子弹ID
+	bulletID := "bullet_" + uuid.New().String()
+
+	// 模拟余额（实际应该从数据库获取）
+	balance := uint64(999900) // 假设扣除了100后的余额
+
+	// 构造响应
+	respProto := &pb.M_1815Toc{
+		BulletId: proto.String(bulletID),
+		Balance:  proto.Uint64(balance),
+	}
+
+	// 序列化protobuf
+	responseData, err := proto.Marshal(respProto)
+	if err != nil {
+		r.logger.Error("[路由] 序列化1815响应失败", zap.Error(err))
+		return nil, err
+	}
+
+	response := &ServerMessage{
+		ErrorID:    0,  // 成功
+		DataStatus: 0,
+		Flag:       msg.Flag,
+		Cmd:        msg.Cmd,
+		Data:       responseData,
+	}
+
+	r.logger.Info("[路由] 发射子弹响应准备完毕",
+		zap.Uint16("cmd", response.Cmd),
+		zap.Uint32("flag", response.Flag),
+		zap.Int("data_len", len(response.Data)),
+		zap.String("bullet_id", bulletID),
+		zap.Uint32("bet_val", betVal))
 
 	return response, nil
 }

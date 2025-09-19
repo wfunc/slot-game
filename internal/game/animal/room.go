@@ -52,14 +52,18 @@ func (r *Room) UpdateAnimals(deltaTime float32) (removedAnimals []uint32) {
 	return removedAnimals
 }
 
-// ProcessBet 处理下注
-func (r *Room) ProcessBet(session *PlayerSession, targetID uint32, betAmount uint32) *BetOutcome {
+// ProcessBet 处理下注（完整实现）
+func (r *Room) ProcessBet(session *PlayerSession, targetID uint32, betAmount uint32, multiple uint32) *BetOutcome {
+	// 初始化结果
 	outcome := &BetOutcome{
 		WinAmount:    0,
 		RedBag:       0,
+		GoldAmount:   0,
 		SkillGain:    []*pb.PAnimalSkill{},
 		FreeGold:     session.Player.FreeGold,
 		KilledRoutes: []*AnimalRoute{},
+		EffectType:   pb.EAnimalType_type_normal,
+		ChainKills:   []uint32{},
 	}
 
 	// 查找目标动物
@@ -68,43 +72,99 @@ func (r *Room) ProcessBet(session *PlayerSession, targetID uint32, betAmount uin
 		return outcome
 	}
 
-	// 简化的命中判定（50%概率）
-	if rand.Float32() < 0.5 {
-		// 计算赔率（简化实现）
-		odds := getAnimalOdds(animal.Animal)
-		outcome.WinAmount = uint32(float32(betAmount) * odds)
+	// 检查一击必杀权限
+	isOneBlow := false
+	if r.oneBlowManager != nil && r.oneBlowManager.CheckOneBlow(session.Player.ID) {
+		isOneBlow = true
+	}
 
-		// 红包奖励
-		if animal.Red {
-			outcome.RedBag = uint32(rand.Intn(100) + 50)
-		}
+	// 使用新的赔率系统计算命中
+	oddsSystem := &OddsSystem{}
+	baseHitRate := float32(0.5) // 基础命中率
 
-		// 记录被击杀的动物
-		outcome.KilledRoutes = append(outcome.KilledRoutes, animal)
+	// 一击必杀直接命中
+	if isOneBlow {
+		baseHitRate = 1.0
+	}
 
+	// 根据房间盈亏调整命中率
+	if oddsSystem.ShouldHit(r.profitControl, baseHitRate) {
 		// 处理特殊动物效果
+		specialProcessor := NewSpecialEffectProcessor(r)
+
 		switch animal.Animal {
 		case pb.EAnimal_pikachu:
-			// 闪电链效果，击杀附近动物
-			for id, nearbyAnimal := range r.animals {
-				if id != targetID && rand.Float32() < 0.3 { // 30%概率连锁
-					outcome.KilledRoutes = append(outcome.KilledRoutes, nearbyAnimal)
-					delete(r.animals, id)
-				}
-			}
+			// 皮卡丘闪电链效果
+			outcome = specialProcessor.ProcessPikachuLightning(targetID, animal, betAmount, multiple, session.Player.ID)
 
 		case pb.EAnimal_bomber:
-			// 全屏爆炸，击杀所有动物
-			for id, a := range r.animals {
-				if id != targetID {
-					outcome.KilledRoutes = append(outcome.KilledRoutes, a)
-					delete(r.animals, id)
-				}
+			// 炸弹人全屏爆炸
+			outcome = specialProcessor.ProcessBomberExplosion(targetID, animal, betAmount, multiple, session.Player.ID)
+
+		default:
+			// 普通击杀
+			outcome = specialProcessor.ProcessNormalKill(targetID, animal, betAmount, multiple, session.Player.ID)
+		}
+
+		// 消耗一击必杀次数
+		if isOneBlow && r.oneBlowManager != nil {
+			r.oneBlowManager.ConsumeOneBlow(session.Player.ID)
+		}
+
+		// 更新房间盈亏控制
+		if r.profitControl != nil {
+			r.profitControl.mu.Lock()
+			r.profitControl.TotalBet += uint64(betAmount * multiple)
+			r.profitControl.TotalWin += uint64(outcome.WinAmount)
+			r.profitControl.mu.Unlock()
+		}
+
+		// 彩金池累积
+		if r.jackpot != nil {
+			r.jackpot.Accumulate(uint64(betAmount*multiple), session.Player.ID)
+
+			// 尝试触发彩金
+			if triggered, winAmount := r.jackpot.TryTrigger(session.Player.ID, uint64(betAmount*multiple)); triggered {
+				outcome.JackpotWin = winAmount
+				outcome.GoldAmount += uint32(winAmount)
 			}
 		}
 
-		// 移除被击杀的主目标
-		delete(r.animals, targetID)
+		// 更新任务进度
+		if r.taskManager != nil {
+			// 击杀事件
+			for _, killed := range outcome.KilledRoutes {
+				r.taskManager.UpdateProgress(TaskEvent{
+					Type:     "kill",
+					Animal:   killed.Animal,
+					RoomType: r.Type,
+					Count:    1,
+				})
+			}
+
+			// 下注事件
+			r.taskManager.UpdateProgress(TaskEvent{
+				Type:      "bet",
+				BetAmount: betAmount * multiple,
+				BetLevel:  betAmount,
+				RoomType:  r.Type,
+			})
+
+			// 赢取事件
+			if outcome.WinAmount > 0 {
+				r.taskManager.UpdateProgress(TaskEvent{
+					Type:      "win",
+					WinAmount: outcome.WinAmount,
+					RoomType:  r.Type,
+					IsJackpot: outcome.JackpotWin > 0,
+				})
+			}
+		}
+
+		// 移除被击杀的动物
+		for _, killedAnimal := range outcome.KilledRoutes {
+			delete(r.animals, killedAnimal.ID)
+		}
 	}
 
 	return outcome
