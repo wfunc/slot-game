@@ -34,6 +34,11 @@ type ProtocolClient struct {
 	// 统计信息
 	lastPing time.Time
 	msgCount int64
+
+	// 玩家游戏状态
+	Balance  uint64       // 当前余额
+	TotalWin uint64       // 累计赢取（进入房间后）
+	mu       sync.RWMutex // 保护游戏状态的并发访问
 }
 
 // NewProtocolClient 创建协议客户端
@@ -47,6 +52,8 @@ func NewProtocolClient(id string, conn *websocket.Conn, handler MessageHandler, 
 		send:     make(chan []byte, 256),
 		done:     make(chan struct{}),
 		lastPing: time.Now(),
+		Balance:  1000000, // 初始余额设置为1000000
+		TotalWin: 0,       // 初始累计赢取为0
 	}
 }
 

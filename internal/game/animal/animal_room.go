@@ -211,10 +211,10 @@ func (r *AnimalRoom) maintainAnimalCount() {
 	// 通过正常的超时机制进行自然淘汰
 }
 
-// generateInitialAnimals 生成初始动物（基于Erlang原版：20只左右）
+// generateInitialAnimals 生成初始动物（基于Erlang原版：20只）
 func (r *AnimalRoom) generateInitialAnimals() {
-	// 基于Erlang原版：初始化20只左右动物
-	initialCount := 18 + r.generator.rand.Intn(5) // 18-22只随机
+	// 基于Erlang原版：初始化20只动物
+	initialCount := 20 // 固定20只
 	for i := 0; i < initialCount; i++ {
 		r.generateNewAnimal()
 	}
@@ -238,14 +238,26 @@ func (r *AnimalRoom) generateNewAnimal() {
 		return
 	}
 
-	// 添加到房间
+	// 立即添加到房间（所有动物都立即加入，这样GetAnimals能获取到）
 	r.animals[newAnimal.ID] = newAnimal
 
 	// 设置动物离开定时器
 	r.scheduleAnimalRemoval(newAnimal)
 
-	// 推送动物进入消息
-	r.pushAnimalEnter(newAnimal)
+	// 检查是否是大象，需要延迟推送进场消息
+	if newAnimal.Animal == pb.EAnimal_elephant {
+		// 推送1883消息 - 大象将在5秒后进场
+		r.pushAnimalComing(newAnimal.Animal, 5)
+
+		// 5秒后推送进场消息（不需要再次获取锁）
+		time.AfterFunc(5*time.Second, func() {
+			// 推送动物进入消息
+			r.pushAnimalEnter(newAnimal)
+		})
+	} else {
+		// 非大象直接推送进场消息
+		r.pushAnimalEnter(newAnimal)
+	}
 }
 
 // scheduleAnimalRemoval 安排动物移除（基于Erlang的erlang:send_after逻辑）
@@ -486,6 +498,26 @@ func (r *AnimalRoom) pushAnimalEnter(animal *AnimalRoute) {
 			ZooType: r.roomType,
 			Message: msg,
 		})
+	}
+}
+
+// pushAnimalComing 推送动物即将进场消息（1883）
+func (r *AnimalRoom) pushAnimalComing(animalType pb.EAnimal, timeSeconds uint32) {
+	if r.pushCallback != nil {
+		msg := &pb.M_1883Toc{
+			Animal: &animalType,
+			Time:   proto.Uint32(timeSeconds),
+		}
+
+		r.pushCallback(&PushMessage{
+			MsgID:   1883,
+			ZooType: r.roomType,
+			Message: msg,
+		})
+
+		r.logger.Info("[AnimalRoom] 推送大象延迟进场",
+			zap.String("animal_type", animalType.String()),
+			zap.Uint32("delay_seconds", timeSeconds))
 	}
 }
 

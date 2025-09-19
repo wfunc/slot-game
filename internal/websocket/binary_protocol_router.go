@@ -307,6 +307,120 @@ func (r *BinaryProtocolRouter) GetAnimalHandler() *AnimalHandler {
 	return r.animalHandler
 }
 
+// AnimalDieInfo 动物死亡信息
+type AnimalDieInfo struct {
+	ID     uint32
+	Win    uint32
+	RedBag uint32
+}
+
+// pushHitAnimal 推送玩家打中动物（1899）
+func (r *BinaryProtocolRouter) pushHitAnimal(roomID uint32, playerID uint32, animalID uint32) {
+	pushMsg := &pb.M_1899Toc{
+		RoleId: proto.Uint32(playerID),
+		Id:     proto.Uint32(animalID),
+	}
+
+	data, err := proto.Marshal(pushMsg)
+	if err != nil {
+		r.logger.Error("[路由] 编码1899推送失败", zap.Error(err))
+		return
+	}
+
+	r.logger.Info("[路由] 推送1899 - 玩家打中动物",
+		zap.Uint32("room_id", roomID),
+		zap.Uint32("player_id", playerID),
+		zap.Uint32("animal_id", animalID))
+
+	r.clientManager.BroadcastToRoom(roomID, 1899, data)
+}
+
+// pushAnimalDie 推送动物死亡（1884）
+func (r *BinaryProtocolRouter) pushAnimalDie(roomID uint32, playerID uint32, skillType pb.EAnimalType, animals []AnimalDieInfo) {
+	// 构建动物列表
+	var animalList []*pb.PAnimalOne
+	for _, animal := range animals {
+		animalList = append(animalList, &pb.PAnimalOne{
+			Id:     proto.Uint32(animal.ID),
+			Win:    proto.Uint32(animal.Win),
+			RedBag: proto.Uint32(animal.RedBag),
+		})
+	}
+
+	pushMsg := &pb.M_1884Toc{
+		RoleId: proto.Uint32(playerID),
+		Type:   &skillType,
+		Ids:    animalList,
+	}
+
+	data, err := proto.Marshal(pushMsg)
+	if err != nil {
+		r.logger.Error("[路由] 编码1884推送失败", zap.Error(err))
+		return
+	}
+
+	r.logger.Info("[路由] 推送1884 - 动物死亡",
+		zap.Uint32("room_id", roomID),
+		zap.Uint32("player_id", playerID),
+		zap.String("skill_type", skillType.String()),
+		zap.Int("animal_count", len(animals)))
+
+	r.clientManager.BroadcastToRoom(roomID, 1884, data)
+}
+
+// pushAnimalComing 推送动物即将进场（1883）
+func (r *BinaryProtocolRouter) pushAnimalComing(roomID uint32, animalType pb.EAnimal, timeSeconds uint32) {
+	pushMsg := &pb.M_1883Toc{
+		Animal: &animalType,
+		Time:   proto.Uint32(timeSeconds),
+	}
+
+	data, err := proto.Marshal(pushMsg)
+	if err != nil {
+		r.logger.Error("[路由] 编码1883推送失败", zap.Error(err))
+		return
+	}
+
+	r.logger.Info("[路由] 推送1883 - 动物即将进场",
+		zap.Uint32("room_id", roomID),
+		zap.String("animal_type", animalType.String()),
+		zap.Uint32("time", timeSeconds))
+
+	r.clientManager.BroadcastToRoom(roomID, 1883, data)
+}
+
+// getAnimalTypeFromID 根据动物ID获取动物类型（模拟）
+func (r *BinaryProtocolRouter) getAnimalTypeFromID(animalID uint32) pb.EAnimal {
+	// 模拟：根据ID确定动物类型
+	types := []pb.EAnimal{
+		pb.EAnimal_turtle,
+		pb.EAnimal_cock,
+		pb.EAnimal_dog,
+		pb.EAnimal_monkey,
+		pb.EAnimal_horse,
+		pb.EAnimal_ox,
+		pb.EAnimal_panda,
+		pb.EAnimal_hippo,
+		pb.EAnimal_lion,
+		pb.EAnimal_elephant,
+		pb.EAnimal_pikachu,
+		pb.EAnimal_bomber,
+	}
+	return types[animalID%uint32(len(types))]
+}
+
+// getSkillTypeForAnimal 获取动物死亡时的技能类型
+func (r *BinaryProtocolRouter) getSkillTypeForAnimal(animalType pb.EAnimal) pb.EAnimalType {
+	switch animalType {
+	case pb.EAnimal_pikachu:
+		return pb.EAnimalType_lightning // 皮卡丘 - 闪电效果
+	case pb.EAnimal_bomber:
+		return pb.EAnimalType_boom // 炸弹人 - 全屏爆炸
+	default:
+		return pb.EAnimalType_type_normal // 普通动物
+	}
+}
+
 // handleAnimalEnterRoom 处理进入动物园房间
 func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg *ClientMessage) (*ServerMessage, error) {
 	r.logger.Info("[路由] 处理1801命令 - 进入动物园房间",
@@ -317,6 +431,11 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	// 暂时使用默认的平民场
 	// var req pb.M_1801Tos
 	// zooType := pb.EZooType_civilian
+
+	// 重置玩家的房间内累计赢取
+	client.mu.Lock()
+	client.TotalWin = 0
+	client.mu.Unlock()
 
 	// 将客户端加入到管理器
 	r.clientManager.AddClient(client)
@@ -352,6 +471,48 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 		Data:       responseData,
 	}
 
+	// 获取房间内现有的动物并发送给新加入的客户端
+	room := r.GetAnimalRoom(roomID)
+	if room != nil {
+		animals := room.GetAnimals()
+		if len(animals) > 0 {
+			r.logger.Info("[路由] 发送现有动物给新客户端",
+				zap.String("client_id", client.ID),
+				zap.Int("animal_count", len(animals)))
+
+			// 创建1887消息（动物进入）并发送给客户端
+			enterMsg := &pb.M_1887Toc{
+				Animal: animals,
+			}
+
+			// 序列化protobuf
+			enterData, err := proto.Marshal(enterMsg)
+			if err == nil {
+				// 创建推送消息
+				pushMsg := &ServerMessage{
+					ErrorID:    0,
+					DataStatus: 0,
+					Flag:       0,
+					Cmd:        1887,
+					Data:       enterData,
+				}
+
+				// 发送给客户端（使用goroutine避免阻塞）
+				go func() {
+					if err := client.SendMessage(pushMsg); err != nil {
+						r.logger.Error("[路由] 发送现有动物失败",
+							zap.String("client_id", client.ID),
+							zap.Error(err))
+					} else {
+						r.logger.Info("[路由] 成功发送现有动物",
+							zap.String("client_id", client.ID),
+							zap.Int("animal_count", len(animals)))
+					}
+				}()
+			}
+		}
+	}
+
 	r.logger.Info("[路由] 进入动物园响应准备完毕",
 		zap.Uint16("cmd", response.Cmd),
 		zap.Uint32("flag", response.Flag),
@@ -365,16 +526,39 @@ func (r *BinaryProtocolRouter) handleAnimalLeaveRoom(client *ProtocolClient, msg
 	r.logger.Info("[路由] 处理1802命令 - 离开动物园房间",
 		zap.String("client_id", client.ID))
 
+	// 获取当前的累计赢取
+	client.mu.RLock()
+	totalWin := client.TotalWin
+	client.mu.RUnlock()
+
 	// 离开房间
 	r.clientManager.LeaveRoom(client.ID)
+
+	// 构造响应 - 必须包含 total_win 字段
+	respProto := &pb.M_1802Toc{
+		TotalWin: proto.Uint32(uint32(totalWin)), // required: 累计赢取（转换为uint32）
+	}
+
+	// 序列化protobuf
+	responseData, err := proto.Marshal(respProto)
+	if err != nil {
+		r.logger.Error("[路由] 序列化1802响应失败", zap.Error(err))
+		return nil, err
+	}
 
 	response := &ServerMessage{
 		ErrorID:    0,  // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
-		Data:       []byte{},
+		Data:       responseData,
 	}
+
+	r.logger.Info("[路由] 离开房间响应准备完毕",
+		zap.Uint16("cmd", response.Cmd),
+		zap.Uint32("flag", response.Flag),
+		zap.Int("data_len", len(response.Data)),
+		zap.Uint32("total_win", uint32(totalWin)))
 
 	return response, nil
 }
@@ -399,31 +583,52 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 		zap.Uint32("animal_id", animalID),
 		zap.String("bullet_id", bulletID))
 
+	// 获取客户端所在房间
+	managedClient := r.clientManager.GetClient(client.ID)
+	if managedClient == nil || managedClient.RoomID == 0 {
+		return nil, fmt.Errorf("客户端不在房间中")
+	}
+	roomID := managedClient.RoomID
+	playerID := managedClient.PlayerID
+
 	// 模拟游戏结果（实际应该调用游戏逻辑）
-	// 随机生成结果
+	// 判断是否击中
 	isHit := animalID%2 == 0 // 偶数ID的动物被击中
+	isDead := false
 	winAmount := uint32(0)
 	redBagAmount := uint32(0)
 
+	// 判断动物是否死亡（模拟：如果ID能被4整除则死亡）
 	if isHit {
-		winAmount = 100 * (1 + animalID%5) // 根据动物ID生成赢取金额
-		if animalID%10 == 0 {
-			redBagAmount = 10 // 10%概率获得红包
+		// 推送1899 - 玩家打中动物但未打死
+		r.pushHitAnimal(roomID, playerID, animalID)
+
+		isDead = animalID%4 == 0 // ID能被4整除的动物会死亡
+		if isDead {
+			winAmount = 100 * (1 + animalID%5) // 根据动物ID生成赢取金额
+			if animalID%10 == 0 {
+				redBagAmount = 10 // 10%概率获得红包
+			}
 		}
 	}
 
-	// 模拟玩家余额（实际应该从数据库获取）
-	currentBalance := uint64(999900)
+	// 使用客户端的真实余额并更新
+	client.mu.Lock()
+	currentBalance := client.Balance
 	if winAmount > 0 {
 		currentBalance += uint64(winAmount)
+		client.Balance = currentBalance
+		client.TotalWin += uint64(winAmount) // 累加总赢取
 	}
+	totalWin := client.TotalWin
+	client.mu.Unlock()
 
 	// 构造响应
 	respProto := &pb.M_1803Toc{
-		Balance:  proto.Uint64(currentBalance),        // required: 当前余额
-		Win:      proto.Uint32(winAmount),             // required: 赢得金额
-		RedBag:   proto.Uint32(redBagAmount),          // required: 红包金额
-		TotalWin: proto.Uint64(uint64(winAmount)),     // required: 累计赢取
+		Balance:  proto.Uint64(currentBalance),    // required: 当前余额
+		Win:      proto.Uint32(winAmount),         // required: 赢得金额
+		RedBag:   proto.Uint32(redBagAmount),      // required: 红包金额
+		TotalWin: proto.Uint64(totalWin),          // required: 本次房间内的累计赢取
 		// Skill 和 FreeGold 是可选的，暂时不填
 	}
 
@@ -451,10 +656,16 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 		zap.Uint32("red_bag", redBagAmount),
 		zap.Uint64("balance", currentBalance))
 
-	// 如果击中，推送动物死亡消息（可选）
-	if isHit && winAmount > 0 {
-		// 这里可以通过PushManager推送1884消息（动物死亡）
-		// 暂时跳过推送逻辑
+	// 如果动物死亡，推送1884消息
+	if isDead && winAmount > 0 {
+		// 判断动物类型以确定技能效果
+		animalType := r.getAnimalTypeFromID(animalID)
+		skillType := r.getSkillTypeForAnimal(animalType)
+
+		// 推送动物死亡消息
+		r.pushAnimalDie(roomID, playerID, skillType, []AnimalDieInfo{
+			{ID: animalID, Win: winAmount, RedBag: redBagAmount},
+		})
 	}
 
 	return response, nil
@@ -482,8 +693,16 @@ func (r *BinaryProtocolRouter) handleAnimalFireBullet(client *ProtocolClient, ms
 	// 生成子弹ID
 	bulletID := "bullet_" + uuid.New().String()
 
-	// 模拟余额（实际应该从数据库获取）
-	balance := uint64(999900) // 假设扣除了100后的余额
+	// 扣除下注金额并更新余额
+	client.mu.Lock()
+	if client.Balance < uint64(betVal) {
+		client.mu.Unlock()
+		// 余额不足
+		return nil, fmt.Errorf("余额不足")
+	}
+	client.Balance -= uint64(betVal)
+	balance := client.Balance
+	client.mu.Unlock()
 
 	// 构造响应
 	respProto := &pb.M_1815Toc{
