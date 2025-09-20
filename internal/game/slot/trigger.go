@@ -9,9 +9,9 @@ type TriggerType string
 
 const (
 	TriggerTypeNone         TriggerType = "none"
-	TriggerTypeAnimalNormal TriggerType = "animal_normal"  // 普通Animal游戏
-	TriggerTypeAnimalSuper  TriggerType = "animal_super"   // 超级Animal游戏
-	TriggerTypeFreeSpins    TriggerType = "free_spins"     // 免费旋转
+	TriggerTypeAnimalNormal TriggerType = "animal_normal" // 普通Animal游戏
+	TriggerTypeAnimalSuper  TriggerType = "animal_super"  // 超级Animal游戏
+	TriggerTypeFreeSpins    TriggerType = "free_spins"    // 免费旋转
 )
 
 // AnimalTriggerConfig Animal游戏触发配置
@@ -20,32 +20,32 @@ type AnimalTriggerConfig struct {
 
 	// 普通Animal游戏触发条件
 	NormalTrigger struct {
-		SymbolID      int `json:"symbol_id"`      // 触发符号ID (SYMBOL_ANIMAL_WILD)
-		RequiredCount int `json:"required_count"` // 需要的符号数量
-		FreeRounds    int `json:"free_rounds"`    // 免费游戏轮数
-		Multiplier    float64 `json:"multiplier"` // 倍率加成
+		SymbolID      int     `json:"symbol_id"`      // 触发符号ID (SYMBOL_ANIMAL_WILD)
+		RequiredCount int     `json:"required_count"` // 需要的符号数量
+		FreeRounds    int     `json:"free_rounds"`    // 免费游戏轮数
+		Multiplier    float64 `json:"multiplier"`     // 倍率加成
 	} `json:"normal_trigger"`
 
 	// 超级Animal游戏触发条件
 	SuperTrigger struct {
-		SymbolID      int `json:"symbol_id"`      // 触发符号ID (SYMBOL_ANIMAL_BONUS)
-		RequiredCount int `json:"required_count"` // 需要的符号数量
-		FreeRounds    int `json:"free_rounds"`    // 免费游戏轮数
-		Multiplier    float64 `json:"multiplier"` // 倍率加成
-		BonusPool     int64   `json:"bonus_pool"` // 额外奖池
+		SymbolID      int     `json:"symbol_id"`      // 触发符号ID (SYMBOL_ANIMAL_BONUS)
+		RequiredCount int     `json:"required_count"` // 需要的符号数量
+		FreeRounds    int     `json:"free_rounds"`    // 免费游戏轮数
+		Multiplier    float64 `json:"multiplier"`     // 倍率加成
+		BonusPool     int64   `json:"bonus_pool"`     // 额外奖池
 	} `json:"super_trigger"`
 }
 
 // AnimalTriggerData Animal游戏触发数据
 type AnimalTriggerData struct {
-	Type         TriggerType      `json:"type"`          // 触发类型
-	SymbolID     int              `json:"symbol_id"`     // 触发符号ID
-	SymbolCount  int              `json:"symbol_count"`  // 触发符号数量
-	Positions    []GamePosition   `json:"positions"`     // 触发符号位置
-	FreeRounds   int              `json:"free_rounds"`   // 免费轮数
-	Multiplier   float64          `json:"multiplier"`    // 倍率
-	BonusPool    int64            `json:"bonus_pool"`    // 奖池金额
-	TriggerGrid  [][]int          `json:"trigger_grid"`  // 触发时的网格状态
+	Type        TriggerType    `json:"type"`         // 触发类型
+	SymbolID    int            `json:"symbol_id"`    // 触发符号ID
+	SymbolCount int            `json:"symbol_count"` // 触发符号数量
+	Positions   []GamePosition `json:"positions"`    // 触发符号位置
+	FreeRounds  int            `json:"free_rounds"`  // 免费轮数
+	Multiplier  float64        `json:"multiplier"`   // 倍率
+	BonusPool   int64          `json:"bonus_pool"`   // 奖池金额
+	TriggerGrid [][]int        `json:"trigger_grid"` // 触发时的网格状态
 }
 
 // GetDefaultAnimalTriggerConfig 获取默认的Animal触发配置
@@ -129,7 +129,7 @@ func (d *TriggerDetector) DetectAnimalTrigger(grid [][]int) *AnimalTriggerData {
 			SymbolID:    d.config.NormalTrigger.SymbolID,
 			SymbolCount: count,
 			Positions:   symbolPositions[d.config.NormalTrigger.SymbolID],
-			FreeRounds:  d.config.NormalTrigger.FreeRounds + (count - d.config.NormalTrigger.RequiredCount) * 5, // 每多一个符号增加5轮
+			FreeRounds:  d.config.NormalTrigger.FreeRounds + (count-d.config.NormalTrigger.RequiredCount)*5, // 每多一个符号增加5轮
 			Multiplier:  d.config.NormalTrigger.Multiplier,
 			BonusPool:   0,
 			TriggerGrid: copyGrid(grid),
@@ -175,18 +175,18 @@ func (d *TriggerDetector) GetTriggerProbability(symbolWeights [][]int) float64 {
 
 	// 简化概率计算
 	singleProb := float64(triggerWeight) / float64(totalWeight)
-	
+
 	// 计算至少3个符号出现的概率（二项分布）
 	// 这里使用简化计算，实际应该更精确
 	gridSize := len(symbolWeights) * 4 // 5列 x 4行
 	minRequired := d.config.NormalTrigger.RequiredCount
-	
+
 	// 使用近似公式
 	prob := 1.0
 	for i := 0; i < minRequired; i++ {
-		prob *= singleProb * float64(gridSize - i) / float64(i + 1)
+		prob *= singleProb * float64(gridSize-i) / float64(i+1)
 	}
-	
+
 	return prob
 }
 

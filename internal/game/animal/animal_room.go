@@ -343,7 +343,11 @@ func (r *AnimalRoom) removeOldestAnimal() {
 func (r *AnimalRoom) GetAnimals() []*pb.PRoute {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	return r.getAnimalsUnlocked()
+}
 
+// getAnimalsUnlocked 获取所有动物（内部使用，不加锁）
+func (r *AnimalRoom) getAnimalsUnlocked() []*pb.PRoute {
 	var routes []*pb.PRoute
 	for _, animal := range r.animals {
 		route := &pb.PRoute{
@@ -356,7 +360,6 @@ func (r *AnimalRoom) GetAnimals() []*pb.PRoute {
 		}
 		routes = append(routes, route)
 	}
-
 	return routes
 }
 
@@ -382,16 +385,23 @@ func (r *AnimalRoom) IsFull() bool {
 
 // EnterRoom 玩家进入房间（基于Erlang的enter_zoo）
 func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon, clientID string) (*pb.M_1801Toc, uint32, error) {
+	r.logger.Info("[AnimalRoom] EnterRoom开始", zap.Uint32("player_id", playerID), zap.Uint32("room_id", r.id))
 	r.mu.Lock()
+	r.logger.Info("[AnimalRoom] 获取到锁", zap.Uint32("player_id", playerID), zap.Uint32("room_id", r.id))
 	defer r.mu.Unlock()
 
+	r.logger.Info("[AnimalRoom] 检查房间是否已满", zap.Uint32("player_id", playerID))
 	// 检查房间是否已满
 	if r.IsFull() {
+		r.logger.Info("[AnimalRoom] 房间已满", zap.Uint32("player_id", playerID))
 		return nil, 0, fmt.Errorf("room is full")
 	}
+	r.logger.Info("[AnimalRoom] 房间未满，继续", zap.Uint32("player_id", playerID))
 
 	// 分配座位
+	r.logger.Info("[AnimalRoom] 分配座位", zap.Uint32("player_id", playerID))
 	seat := r.GetAvailableSeat()
+	r.logger.Info("[AnimalRoom] 座位分配完成", zap.Uint32("player_id", playerID), zap.Uint32("seat", seat))
 	if seat == 0 {
 		return nil, 0, fmt.Errorf("no available seat")
 	}
@@ -411,18 +421,37 @@ func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon, clientID string) (*p
 	}
 
 	r.players[playerID] = session
+	r.logger.Info("[AnimalRoom] 玩家会话已创建", zap.Uint32("player_id", playerID))
 
 	// 准备响应数据
-	response := &pb.M_1801Toc{
-		BetVal:  r.getBetValues(),
-		Odds:    r.getAnimalOdds(),
-		Animals: r.GetAnimals(),
-		Players: r.getPlayerList(),
-		Time:    proto.Uint32(uint32(time.Until(r.iceTime).Seconds())),
+	r.logger.Info("[AnimalRoom] 准备响应数据 - 获取BetValues", zap.Uint32("player_id", playerID))
+	betValues := r.getBetValues()
+	r.logger.Info("[AnimalRoom] 准备响应数据 - 获取Odds", zap.Uint32("player_id", playerID))
+	odds := r.getAnimalOdds()
+	r.logger.Info("[AnimalRoom] 准备响应数据 - 获取Animals", zap.Uint32("player_id", playerID))
+	animals := r.getAnimalsUnlocked() // 使用不加锁的版本，因为已经持有写锁
+	r.logger.Info("[AnimalRoom] 准备响应数据 - 获取Players", zap.Uint32("player_id", playerID))
+	players := r.getPlayerList()
+	r.logger.Info("[AnimalRoom] 准备响应数据 - 计算时间", zap.Uint32("player_id", playerID))
+	// 避免iceTime未初始化的问题
+	var timeLeft uint32 = 30 // 默认30秒
+	if !r.iceTime.IsZero() {
+		timeLeft = uint32(time.Until(r.iceTime).Seconds())
 	}
 
+	response := &pb.M_1801Toc{
+		BetVal:  betValues,
+		Odds:    odds,
+		Animals: animals,
+		Players: players,
+		Time:    proto.Uint32(timeLeft),
+	}
+	r.logger.Info("[AnimalRoom] 响应数据准备完成", zap.Uint32("player_id", playerID))
+
 	// 推送玩家进入消息给其他玩家
+	r.logger.Info("[AnimalRoom] 推送玩家进入消息", zap.Uint32("player_id", playerID))
 	r.pushPlayerEnter(session)
+	r.logger.Info("[AnimalRoom] 推送完成", zap.Uint32("player_id", playerID))
 
 	r.logger.Info("[AnimalRoom] 玩家进入房间",
 		zap.Uint32("room_id", r.id),

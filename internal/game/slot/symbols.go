@@ -19,26 +19,26 @@ const (
 	SYMBOL_ANIMAL_BONUS = 10 // 动物Bonus符号（触发超级Animal游戏）
 
 	// 金色符号范围 (16-23)
-	SYMBOL_GOLDEN_BASE   = 16
-	SYMBOL_GOLDEN_1      = 16 // 金色一筒
-	SYMBOL_GOLDEN_2      = 17 // 金色二筒
-	SYMBOL_GOLDEN_3      = 18 // 金色三筒
-	SYMBOL_GOLDEN_4      = 19 // 金色四筒
-	SYMBOL_GOLDEN_5      = 20 // 金色五筒
-	SYMBOL_GOLDEN_6      = 21 // 金色六筒
-	SYMBOL_GOLDEN_7      = 22 // 金色七筒
-	SYMBOL_GOLDEN_8      = 23 // 金色八筒
+	SYMBOL_GOLDEN_BASE = 16
+	SYMBOL_GOLDEN_1    = 16 // 金色一筒
+	SYMBOL_GOLDEN_2    = 17 // 金色二筒
+	SYMBOL_GOLDEN_3    = 18 // 金色三筒
+	SYMBOL_GOLDEN_4    = 19 // 金色四筒
+	SYMBOL_GOLDEN_5    = 20 // 金色五筒
+	SYMBOL_GOLDEN_6    = 21 // 金色六筒
+	SYMBOL_GOLDEN_7    = 22 // 金色七筒
+	SYMBOL_GOLDEN_8    = 23 // 金色八筒
 )
 
 // SymbolInfo 符号信息
 type SymbolInfo struct {
-	ID          int     `json:"id"`
-	Name        string  `json:"name"`
-	Type        string  `json:"type"`        // normal, wild, scatter, bonus
-	Display     string  `json:"display"`     // 显示字符
-	Description string  `json:"description"`
-	CanBeGolden bool    `json:"can_be_golden"` // 是否可以变成金色
-	IsSpecial   bool    `json:"is_special"`    // 是否为特殊符号
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`    // normal, wild, scatter, bonus
+	Display     string `json:"display"` // 显示字符
+	Description string `json:"description"`
+	CanBeGolden bool   `json:"can_be_golden"` // 是否可以变成金色
+	IsSpecial   bool   `json:"is_special"`    // 是否为特殊符号
 }
 
 // GetSymbolInfo 获取符号信息
@@ -187,9 +187,9 @@ func GetSymbolInfo(symbolID int) *SymbolInfo {
 
 // IsSpecialSymbol 判断是否为特殊符号
 func IsSpecialSymbol(symbolID int) bool {
-	return symbolID == SYMBOL_WILD || 
-		symbolID == SYMBOL_SCATTER || 
-		symbolID == SYMBOL_ANIMAL_WILD || 
+	return symbolID == SYMBOL_WILD ||
+		symbolID == SYMBOL_SCATTER ||
+		symbolID == SYMBOL_ANIMAL_WILD ||
 		symbolID == SYMBOL_ANIMAL_BONUS ||
 		(symbolID >= SYMBOL_GOLDEN_BASE && symbolID <= SYMBOL_GOLDEN_8)
 }

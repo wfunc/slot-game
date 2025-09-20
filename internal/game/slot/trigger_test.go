@@ -6,11 +6,11 @@ import (
 
 func TestGetDefaultAnimalTriggerConfig(t *testing.T) {
 	config := GetDefaultAnimalTriggerConfig()
-	
+
 	if !config.Enabled {
 		t.Error("默认配置应该启用Animal触发")
 	}
-	
+
 	// 测试普通触发配置
 	if config.NormalTrigger.SymbolID != SYMBOL_ANIMAL_WILD {
 		t.Errorf("普通触发符号ID = %v, want %v", config.NormalTrigger.SymbolID, SYMBOL_ANIMAL_WILD)
@@ -24,7 +24,7 @@ func TestGetDefaultAnimalTriggerConfig(t *testing.T) {
 	if config.NormalTrigger.Multiplier != 1.5 {
 		t.Errorf("普通触发倍率 = %v, want %v", config.NormalTrigger.Multiplier, 1.5)
 	}
-	
+
 	// 测试超级触发配置
 	if config.SuperTrigger.SymbolID != SYMBOL_ANIMAL_BONUS {
 		t.Errorf("超级触发符号ID = %v, want %v", config.SuperTrigger.SymbolID, SYMBOL_ANIMAL_BONUS)
@@ -45,7 +45,7 @@ func TestGetDefaultAnimalTriggerConfig(t *testing.T) {
 
 func TestDetectAnimalTrigger(t *testing.T) {
 	detector := NewTriggerDetector(nil) // 使用默认配置
-	
+
 	tests := []struct {
 		name         string
 		grid         [][]int
@@ -108,27 +108,27 @@ func TestDetectAnimalTrigger(t *testing.T) {
 			expectRounds: 30,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			trigger := detector.DetectAnimalTrigger(tt.grid)
-			
+
 			if tt.expectType == TriggerTypeNone {
 				if trigger != nil {
 					t.Errorf("期望无触发，但得到了触发: %v", trigger.Type)
 				}
 				return
 			}
-			
+
 			if trigger == nil {
 				t.Errorf("期望触发类型 %v，但没有触发", tt.expectType)
 				return
 			}
-			
+
 			if trigger.Type != tt.expectType {
 				t.Errorf("触发类型 = %v, want %v", trigger.Type, tt.expectType)
 			}
-			
+
 			if trigger.FreeRounds != tt.expectRounds {
 				t.Errorf("免费轮数 = %v, want %v", trigger.FreeRounds, tt.expectRounds)
 			}
@@ -138,20 +138,20 @@ func TestDetectAnimalTrigger(t *testing.T) {
 
 func TestCountTriggerSymbols(t *testing.T) {
 	detector := NewTriggerDetector(nil)
-	
+
 	grid := [][]int{
 		{SYMBOL_ANIMAL_WILD, 1, SYMBOL_ANIMAL_BONUS, 3, 4},
 		{1, SYMBOL_ANIMAL_WILD, 3, 4, 5},
 		{SYMBOL_ANIMAL_BONUS, 3, SYMBOL_ANIMAL_WILD, 5, 6},
 		{3, 4, 5, 6, 7},
 	}
-	
+
 	counts := detector.CountTriggerSymbols(grid)
-	
+
 	if counts[SYMBOL_ANIMAL_WILD] != 3 {
 		t.Errorf("Animal Wild数量 = %v, want %v", counts[SYMBOL_ANIMAL_WILD], 3)
 	}
-	
+
 	if counts[SYMBOL_ANIMAL_BONUS] != 2 {
 		t.Errorf("Animal Bonus数量 = %v, want %v", counts[SYMBOL_ANIMAL_BONUS], 2)
 	}
@@ -159,18 +159,18 @@ func TestCountTriggerSymbols(t *testing.T) {
 
 func TestValidateTriggerConfig(t *testing.T) {
 	detector := NewTriggerDetector(nil)
-	
+
 	// 默认配置应该有效
 	if err := detector.ValidateTriggerConfig(); err != nil {
 		t.Errorf("默认配置验证失败: %v", err)
 	}
-	
+
 	// 测试无效配置
 	invalidConfig := &AnimalTriggerConfig{
 		Enabled: true,
 	}
 	invalidConfig.NormalTrigger.RequiredCount = 0
-	
+
 	detector = NewTriggerDetector(invalidConfig)
 	if err := detector.ValidateTriggerConfig(); err == nil {
 		t.Error("无效配置应该验证失败")
@@ -182,7 +182,7 @@ func TestTriggerDetectorDisabled(t *testing.T) {
 		Enabled: false,
 	}
 	detector := NewTriggerDetector(config)
-	
+
 	// 即使有触发符号，禁用时也不应该触发
 	grid := [][]int{
 		{SYMBOL_ANIMAL_WILD, SYMBOL_ANIMAL_WILD, SYMBOL_ANIMAL_WILD, 3, 4},
@@ -190,7 +190,7 @@ func TestTriggerDetectorDisabled(t *testing.T) {
 		{2, 3, 4, 5, 6},
 		{3, 4, 5, 6, 7},
 	}
-	
+
 	trigger := detector.DetectAnimalTrigger(grid)
 	if trigger != nil {
 		t.Error("禁用时不应该检测到触发")
@@ -202,9 +202,9 @@ func TestCopyGrid(t *testing.T) {
 		{1, 2, 3},
 		{4, 5, 6},
 	}
-	
+
 	copied := copyGrid(original)
-	
+
 	// 验证内容相同
 	for i := range original {
 		for j := range original[i] {
@@ -213,7 +213,7 @@ func TestCopyGrid(t *testing.T) {
 			}
 		}
 	}
-	
+
 	// 验证是独立的副本
 	copied[0][0] = 999
 	if original[0][0] == 999 {

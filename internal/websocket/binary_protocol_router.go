@@ -15,16 +15,16 @@ import (
 // BinaryProtocolRouter 二进制协议路由器，将前端的二进制协议转换为内部的protobuf消息并路由
 // 实现 MessageHandler 接口
 type BinaryProtocolRouter struct {
-	slotHandler    *SlotHandler
-	animalHandler  *AnimalHandler
-	configHandler  *ConfigHandler
-	codec          *ProtobufCodec
-	clientManager  *ClientManager
-	pushManager    *PushManager
-	animalRooms    map[uint32]*animal.AnimalRoom // roomID -> room
+	slotHandler      *SlotHandler
+	animalHandler    *AnimalHandler
+	configHandler    *ConfigHandler
+	codec            *ProtobufCodec
+	clientManager    *ClientManager
+	pushManager      *PushManager
+	animalRooms      map[uint32]*animal.AnimalRoom // roomID -> room
 	animalRoomsMutex sync.RWMutex
-	logger         *zap.Logger
-	db             *gorm.DB
+	logger           *zap.Logger
+	db               *gorm.DB
 }
 
 // 确保 BinaryProtocolRouter 实现了 MessageHandler 接口
@@ -135,7 +135,7 @@ func (r *BinaryProtocolRouter) routeToAnimalHandler(client *ProtocolClient, msg 
 	default:
 		// 其他命令暂时返回空响应
 		response := &ServerMessage{
-			ErrorID:    0,  // 成功
+			ErrorID:    0, // 成功
 			DataStatus: 0,
 			Flag:       msg.Flag,
 			Cmd:        msg.Cmd,
@@ -170,7 +170,7 @@ func (r *BinaryProtocolRouter) routeToConfigHandler(client *ProtocolClient, msg 
 		// TODO: 实际调用ConfigHandler的相应方法
 		// 返回空的protobuf数据
 		return &ServerMessage{
-			ErrorID:    0,  // 成功
+			ErrorID:    0, // 成功
 			DataStatus: 0,
 			Flag:       msg.Flag,
 			Cmd:        msg.Cmd,
@@ -197,7 +197,7 @@ func (r *BinaryProtocolRouter) handleConfigQuery(client *ProtocolClient, msg *Cl
 	// 返回空数据的成功响应（ErrorID=0，无数据）
 	// 这样前端就不会报错了
 	response := &ServerMessage{
-		ErrorID:    0,     // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -249,7 +249,7 @@ func (r *BinaryProtocolRouter) createSlotResponse(client *ProtocolClient, msg *C
 
 		respProto := &pb.M_1901Toc{
 			BetVal: []uint32{100, 200, 500, 1000, 2000}, // 下注档位
-			Cfg:    cfg,  // required配置
+			Cfg:    cfg,                                 // required配置
 		}
 
 		// 序列化protobuf
@@ -260,7 +260,7 @@ func (r *BinaryProtocolRouter) createSlotResponse(client *ProtocolClient, msg *C
 		}
 
 		response = &ServerMessage{
-			ErrorID:    0,  // 成功
+			ErrorID:    0, // 成功
 			DataStatus: 0,
 			Flag:       msg.Flag,
 			Cmd:        msg.Cmd,
@@ -271,7 +271,7 @@ func (r *BinaryProtocolRouter) createSlotResponse(client *ProtocolClient, msg *C
 		// TODO: 实际应该返回 m_1902_toc protobuf消息
 		r.logger.Info("[路由] 处理1902命令 - 开始游戏")
 		response = &ServerMessage{
-			ErrorID:    0,  // 成功
+			ErrorID:    0, // 成功
 			DataStatus: 0,
 			Flag:       msg.Flag,
 			Cmd:        msg.Cmd,
@@ -282,7 +282,7 @@ func (r *BinaryProtocolRouter) createSlotResponse(client *ProtocolClient, msg *C
 		r.logger.Info("[路由] 处理其他Slot命令",
 			zap.Uint16("cmd", msg.Cmd))
 		response = &ServerMessage{
-			ErrorID:    0,  // 成功
+			ErrorID:    0, // 成功
 			DataStatus: 0,
 			Flag:       msg.Flag,
 			Cmd:        msg.Cmd,
@@ -474,11 +474,29 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	// 如果房间不存在，创建新房间
 	if room == nil {
 		r.logger.Info("[路由] 房间不存在，创建新房间", zap.Uint32("room_id", roomID))
-		room = r.GetAnimalRoom(roomID) // 会自动创建
+
+		// 创建推送回调函数
+		pushCallback := r.pushManager.CreatePushCallback(roomID)
+
+		// 创建并启动新房间
+		zooType := pb.EZooType_civilian // 平民场
+		room = animal.NewAnimalRoom(roomID, zooType, r.logger, pushCallback)
+		room.Start()
+
+		// 存储到房间map中
+		r.animalRoomsMutex.Lock()
+		r.animalRooms[roomID] = room
+		r.animalRoomsMutex.Unlock()
+
+		r.logger.Info("[路由] 新房间创建成功",
+			zap.Uint32("room_id", roomID),
+			zap.String("zoo_type", zooType.String()))
 	}
 
 	// 尝试加入房间，获取座位号
+	r.logger.Info("[路由] 准备调用EnterRoom", zap.Uint32("room_id", roomID), zap.Uint32("player_id", playerID))
 	_, seat, err := room.EnterRoom(playerID, "Player", "", client.ID)
+	r.logger.Info("[路由] EnterRoom返回", zap.Uint32("room_id", roomID), zap.Error(err))
 	if err != nil {
 		// 房间满员，需要创建新房间
 		r.logger.Info("[路由] 房间满员，创建新房间", zap.Error(err))
@@ -488,8 +506,25 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 		roomID = uint32(len(r.animalRooms) + 1)
 		r.animalRoomsMutex.Unlock()
 
-		// 获取或创建新房间
-		room = r.GetAnimalRoom(roomID)
+		// 创建新房间
+		r.logger.Info("[路由] 创建新房间", zap.Uint32("room_id", roomID))
+
+		// 创建推送回调函数
+		pushCallback := r.pushManager.CreatePushCallback(roomID)
+
+		// 创建并启动新房间
+		zooType := pb.EZooType_civilian // 平民场
+		room = animal.NewAnimalRoom(roomID, zooType, r.logger, pushCallback)
+		room.Start()
+
+		// 存储到房间map中
+		r.animalRoomsMutex.Lock()
+		r.animalRooms[roomID] = room
+		r.animalRoomsMutex.Unlock()
+
+		r.logger.Info("[路由] 新房间创建成功",
+			zap.Uint32("room_id", roomID),
+			zap.String("zoo_type", zooType.String()))
 
 		// 再次尝试加入新房间
 		_, seat, err = room.EnterRoom(playerID, "Player", "", client.ID)
@@ -497,7 +532,7 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 			r.logger.Error("[路由] 无法加入新房间", zap.Error(err))
 			// 返回错误响应
 			return &ServerMessage{
-				ErrorID:    1001,  // 房间满员错误
+				ErrorID:    1001, // 房间满员错误
 				DataStatus: 0,
 				Flag:       msg.Flag,
 				Cmd:        msg.Cmd,
@@ -518,8 +553,8 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	redState := false
 	time := uint32(30)
 	respProto := &pb.M_1801Toc{
-		RedState: &redState,  // required bool
-		Time:     &time,      // required uint32
+		RedState: &redState,                     // required bool
+		Time:     &time,                         // required uint32
 		BetVal:   []uint32{100, 200, 500, 1000}, // 下注档位
 	}
 
@@ -531,7 +566,7 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	}
 
 	response := &ServerMessage{
-		ErrorID:    0,  // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -614,7 +649,7 @@ func (r *BinaryProtocolRouter) handleAnimalLeaveRoom(client *ProtocolClient, msg
 	}
 
 	response := &ServerMessage{
-		ErrorID:    0,  // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -660,8 +695,8 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 
 	// 模拟游戏结果（实际应该调用游戏逻辑）
 	// 判断是否击中
-	isHit := animalID%2 == 0 // 偶数ID的动物被击中
-	isDead := false
+	isHit := true
+	isDead := true
 	winAmount := uint32(0)
 	redBagAmount := uint32(0)
 
@@ -670,12 +705,8 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 		// 推送1899 - 玩家打中动物但未打死
 		r.pushHitAnimal(roomID, playerID, animalID)
 
-		isDead = animalID%4 == 0 // ID能被4整除的动物会死亡
 		if isDead {
 			winAmount = 100 * (1 + animalID%5) // 根据动物ID生成赢取金额
-			if animalID%10 == 0 {
-				redBagAmount = 10 // 10%概率获得红包
-			}
 		}
 	}
 
@@ -692,10 +723,10 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 
 	// 构造响应
 	respProto := &pb.M_1803Toc{
-		Balance:  proto.Uint64(currentBalance),    // required: 当前余额
-		Win:      proto.Uint32(winAmount),         // required: 赢得金额
-		RedBag:   proto.Uint32(redBagAmount),      // required: 红包金额
-		TotalWin: proto.Uint64(totalWin),          // required: 本次房间内的累计赢取
+		Balance:  proto.Uint64(currentBalance), // required: 当前余额
+		Win:      proto.Uint32(winAmount),      // required: 赢得金额
+		RedBag:   proto.Uint32(redBagAmount),   // required: 红包金额
+		TotalWin: proto.Uint64(totalWin),       // required: 本次房间内的累计赢取
 		// Skill 和 FreeGold 是可选的，暂时不填
 	}
 
@@ -707,7 +738,7 @@ func (r *BinaryProtocolRouter) handleAnimalBet(client *ProtocolClient, msg *Clie
 	}
 
 	response := &ServerMessage{
-		ErrorID:    0,  // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -785,7 +816,7 @@ func (r *BinaryProtocolRouter) handleAnimalFireBullet(client *ProtocolClient, ms
 	}
 
 	response := &ServerMessage{
-		ErrorID:    0,  // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -811,11 +842,11 @@ func (r *BinaryProtocolRouter) handleGetUserInfo(client *ProtocolClient, msg *Cl
 	// 创建正确的protobuf响应，包含必需的字段
 	// m_2001_toc 要求 role_id 和 balance
 	roleID := uint32(10001)    // 模拟用户ID
-	balance := uint64(1000000)  // 模拟余额（10000.00）
-	
+	balance := uint64(1000000) // 模拟余额（10000.00）
+
 	respProto := &pb.M_2001Toc{
-		RoleId:  &roleID,   // required uint32
-		Balance: &balance,  // required uint64
+		RoleId:  &roleID,  // required uint32
+		Balance: &balance, // required uint64
 	}
 
 	// 序列化protobuf
@@ -826,7 +857,7 @@ func (r *BinaryProtocolRouter) handleGetUserInfo(client *ProtocolClient, msg *Cl
 	}
 
 	response := &ServerMessage{
-		ErrorID:    0,  // 成功
+		ErrorID:    0, // 成功
 		DataStatus: 0,
 		Flag:       msg.Flag,
 		Cmd:        msg.Cmd,
@@ -855,7 +886,10 @@ func (r *BinaryProtocolRouter) initDefaultAnimalRoom() {
 	room := animal.NewAnimalRoom(roomID, zooType, r.logger, pushCallback)
 	room.Start()
 
+	// 使用互斥锁保护map写入
+	r.animalRoomsMutex.Lock()
 	r.animalRooms[roomID] = room
+	r.animalRoomsMutex.Unlock()
 
 	r.logger.Info("[路由] 默认动物房间已初始化",
 		zap.Uint32("room_id", roomID),
@@ -864,6 +898,8 @@ func (r *BinaryProtocolRouter) initDefaultAnimalRoom() {
 
 // GetAnimalRoom 获取动物房间
 func (r *BinaryProtocolRouter) GetAnimalRoom(roomID uint32) *animal.AnimalRoom {
+	r.animalRoomsMutex.RLock()
+	defer r.animalRoomsMutex.RUnlock()
 	return r.animalRooms[roomID]
 }
 

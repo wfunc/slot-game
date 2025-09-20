@@ -9,7 +9,7 @@ import (
 type ThemeRenderer interface {
 	// 渲染抽象结果为主题化结果
 	RenderResult(abstract *AbstractGameResult, themeID string) (*ThemedGameResult, error)
-	
+
 	// 主题管理
 	GetTheme(themeID string) (*Theme, error)
 	ListThemes() []string
@@ -20,55 +20,56 @@ type ThemeRenderer interface {
 type ThemedGameResult struct {
 	// 继承抽象结果的所有数值属性
 	*AbstractGameResult
-	
+
 	// 主题化的视觉内容
-	ThemeID      string           `json:"theme_id"`
-	ThemeName    string           `json:"theme_name"`
-	ReelSymbols  [][]ThemeSymbol  `json:"reel_symbols"`    // 实际显示的符号
-	WinAnimations []Animation     `json:"win_animations"`  // 获胜动画
-	SoundEffects []SoundEffect   `json:"sound_effects"`   // 音效
-	VisualEffects []VisualEffect `json:"visual_effects"`  // 视觉特效
+	ThemeID       string          `json:"theme_id"`
+	ThemeName     string          `json:"theme_name"`
+	ReelSymbols   [][]ThemeSymbol `json:"reel_symbols"`   // 实际显示的符号
+	WinAnimations []Animation     `json:"win_animations"` // 获胜动画
+	SoundEffects  []SoundEffect   `json:"sound_effects"`  // 音效
+	VisualEffects []VisualEffect  `json:"visual_effects"` // 视觉特效
 }
 
 // ThemeSymbol 主题符号（重命名避免冲突）
 type ThemeSymbol struct {
-	ID          int                    `json:"id"`           // 抽象符号ID
-	Name        string                 `json:"name"`         // 符号名称
-	ImageURL    string                 `json:"image_url"`    // 图片URL
-	Animation   string                 `json:"animation"`    // 动画名称
-	Rarity      SymbolRarity          `json:"rarity"`       // 稀有度
-	Properties  map[string]interface{} `json:"properties"`   // 符号属性
+	ID         int                    `json:"id"`         // 抽象符号ID
+	Name       string                 `json:"name"`       // 符号名称
+	ImageURL   string                 `json:"image_url"`  // 图片URL
+	Animation  string                 `json:"animation"`  // 动画名称
+	Rarity     SymbolRarity           `json:"rarity"`     // 稀有度
+	Properties map[string]interface{} `json:"properties"` // 符号属性
 }
 
 // Animation 动画配置
 type Animation struct {
-	Type        AnimationType          `json:"type"`
-	Target      []Position            `json:"target"`       // 动画目标位置
-	Duration    int                   `json:"duration"`     // 持续时间(ms)
-	Sequence    []AnimationFrame      `json:"sequence"`     // 动画帧序列
-	Properties  map[string]interface{} `json:"properties"`
+	Type       AnimationType          `json:"type"`
+	Target     []Position             `json:"target"`   // 动画目标位置
+	Duration   int                    `json:"duration"` // 持续时间(ms)
+	Sequence   []AnimationFrame       `json:"sequence"` // 动画帧序列
+	Properties map[string]interface{} `json:"properties"`
 }
 
 // SoundEffect 音效配置
 type SoundEffect struct {
-	Type     SoundType `json:"type"`
-	FileURL  string    `json:"file_url"`
-	Volume   float64   `json:"volume"`
-	Loop     bool      `json:"loop"`
-	Delay    int       `json:"delay"`
+	Type    SoundType `json:"type"`
+	FileURL string    `json:"file_url"`
+	Volume  float64   `json:"volume"`
+	Loop    bool      `json:"loop"`
+	Delay   int       `json:"delay"`
 }
 
 // VisualEffect 视觉特效
 type VisualEffect struct {
-	Type        EffectType             `json:"type"`
-	Target      []Position            `json:"target"`
-	Duration    int                   `json:"duration"`
-	Intensity   float64               `json:"intensity"`
-	Properties  map[string]interface{} `json:"properties"`
+	Type       EffectType             `json:"type"`
+	Target     []Position             `json:"target"`
+	Duration   int                    `json:"duration"`
+	Intensity  float64                `json:"intensity"`
+	Properties map[string]interface{} `json:"properties"`
 }
 
 // 枚举定义
 type SymbolRarity int
+
 const (
 	RarityCommon SymbolRarity = iota
 	RarityRare
@@ -77,6 +78,7 @@ const (
 )
 
 type AnimationType int
+
 const (
 	AnimationTypeWinLine AnimationType = iota
 	AnimationTypeSymbolWin
@@ -86,6 +88,7 @@ const (
 )
 
 type SoundType int
+
 const (
 	SoundTypeSpin SoundType = iota
 	SoundTypeWin
@@ -96,6 +99,7 @@ const (
 )
 
 type EffectType int
+
 const (
 	EffectTypeParticle EffectType = iota
 	EffectTypeFlash
@@ -106,67 +110,67 @@ const (
 
 type AnimationFrame struct {
 	ImageURL   string                 `json:"image_url"`
-	Duration   int                   `json:"duration"`
-	Transform  Transform             `json:"transform"`
+	Duration   int                    `json:"duration"`
+	Transform  Transform              `json:"transform"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
 type Transform struct {
-	Scale     float64 `json:"scale"`
-	Rotation  float64 `json:"rotation"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	Alpha     float64 `json:"alpha"`
+	Scale    float64 `json:"scale"`
+	Rotation float64 `json:"rotation"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Alpha    float64 `json:"alpha"`
 }
 
 // Theme 游戏主题配置
 type Theme struct {
-	ID          string              `json:"id"`
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Version     string              `json:"version"`
-	
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+
 	// 符号映射：抽象ID -> 主题符号
-	SymbolMap   map[int]ThemeSymbol `json:"symbol_map"`
-	
+	SymbolMap map[int]ThemeSymbol `json:"symbol_map"`
+
 	// 背景配置
-	Background  BackgroundConfig    `json:"background"`
-	
+	Background BackgroundConfig `json:"background"`
+
 	// 音效映射
-	Sounds      map[SoundType]SoundEffect `json:"sounds"`
-	
+	Sounds map[SoundType]SoundEffect `json:"sounds"`
+
 	// 动画配置
-	Animations  map[AnimationType][]Animation `json:"animations"`
-	
+	Animations map[AnimationType][]Animation `json:"animations"`
+
 	// 特效配置
-	Effects     map[EffectType]VisualEffect `json:"effects"`
-	
+	Effects map[EffectType]VisualEffect `json:"effects"`
+
 	// UI配置
-	UI          UIConfig           `json:"ui"`
-	
+	UI UIConfig `json:"ui"`
+
 	// 扩展属性
-	Properties  map[string]interface{} `json:"properties"`
+	Properties map[string]interface{} `json:"properties"`
 }
 
 type BackgroundConfig struct {
-	ImageURL    string `json:"image_url"`
-	Color       string `json:"color"`
-	Animation   string `json:"animation"`
-	MusicURL    string `json:"music_url"`
+	ImageURL    string  `json:"image_url"`
+	Color       string  `json:"color"`
+	Animation   string  `json:"animation"`
+	MusicURL    string  `json:"music_url"`
 	MusicVolume float64 `json:"music_volume"`
 }
 
 type UIConfig struct {
-	ReelFrame   string `json:"reel_frame"`
-	Buttons     map[string]ButtonConfig `json:"buttons"`
-	Colors      map[string]string `json:"colors"`
-	Fonts       map[string]FontConfig `json:"fonts"`
+	ReelFrame string                  `json:"reel_frame"`
+	Buttons   map[string]ButtonConfig `json:"buttons"`
+	Colors    map[string]string       `json:"colors"`
+	Fonts     map[string]FontConfig   `json:"fonts"`
 }
 
 type ButtonConfig struct {
-	ImageURL     string `json:"image_url"`
+	ImageURL      string `json:"image_url"`
 	HoverImageURL string `json:"hover_image_url"`
-	Sound        string `json:"sound"`
+	Sound         string `json:"sound"`
 }
 
 type FontConfig struct {
@@ -186,7 +190,7 @@ func NewDefaultThemeRenderer() *DefaultThemeRenderer {
 	renderer := &DefaultThemeRenderer{
 		themes: make(map[string]*Theme),
 	}
-	
+
 	// 注册内置主题
 	renderer.registerBuiltinThemes()
 	return renderer
@@ -198,37 +202,37 @@ func (r *DefaultThemeRenderer) RenderResult(abstract *AbstractGameResult, themeI
 	if err != nil {
 		return nil, fmt.Errorf("theme not found: %s", themeID)
 	}
-	
+
 	// 1. 转换转轴符号
 	reelSymbols := r.convertReelSymbols(abstract.ReelResults, theme)
-	
+
 	// 2. 生成获胜动画
 	winAnimations := r.generateWinAnimations(abstract, theme)
-	
+
 	// 3. 生成音效
 	soundEffects := r.generateSoundEffects(abstract, theme)
-	
+
 	// 4. 生成视觉特效
 	visualEffects := r.generateVisualEffects(abstract, theme)
-	
+
 	return &ThemedGameResult{
 		AbstractGameResult: abstract,
-		ThemeID:           theme.ID,
-		ThemeName:         theme.Name,
-		ReelSymbols:       reelSymbols,
-		WinAnimations:     winAnimations,
-		SoundEffects:      soundEffects,
-		VisualEffects:     visualEffects,
+		ThemeID:            theme.ID,
+		ThemeName:          theme.Name,
+		ReelSymbols:        reelSymbols,
+		WinAnimations:      winAnimations,
+		SoundEffects:       soundEffects,
+		VisualEffects:      visualEffects,
 	}, nil
 }
 
 // convertReelSymbols 转换转轴符号
 func (r *DefaultThemeRenderer) convertReelSymbols(reelResults [][]int, theme *Theme) [][]ThemeSymbol {
 	reelSymbols := make([][]ThemeSymbol, len(reelResults))
-	
+
 	for reelIndex, reel := range reelResults {
 		reelSymbols[reelIndex] = make([]ThemeSymbol, len(reel))
-		
+
 		for rowIndex, symbolID := range reel {
 			// 从主题符号映射中获取具体符号
 			if symbol, exists := theme.SymbolMap[symbolID]; exists {
@@ -239,17 +243,17 @@ func (r *DefaultThemeRenderer) convertReelSymbols(reelResults [][]int, theme *Th
 			}
 		}
 	}
-	
+
 	return reelSymbols
 }
 
 // generateWinAnimations 生成获胜动画
 func (r *DefaultThemeRenderer) generateWinAnimations(abstract *AbstractGameResult, theme *Theme) []Animation {
 	var animations []Animation
-	
+
 	// 根据赢取类型选择动画
 	animationType := r.getAnimationTypeForWin(abstract.WinType)
-	
+
 	// 获取主题动画配置
 	if themeAnimations, exists := theme.Animations[animationType]; exists {
 		// 为每条获胜线生成动画
@@ -266,7 +270,7 @@ func (r *DefaultThemeRenderer) generateWinAnimations(abstract *AbstractGameResul
 			}
 		}
 	}
-	
+
 	// 特殊功能动画
 	for _, feature := range abstract.Features {
 		if featureAnims, exists := theme.Animations[AnimationTypeFeatureTrigger]; exists {
@@ -282,19 +286,19 @@ func (r *DefaultThemeRenderer) generateWinAnimations(abstract *AbstractGameResul
 			}
 		}
 	}
-	
+
 	return animations
 }
 
 // generateSoundEffects 生成音效
 func (r *DefaultThemeRenderer) generateSoundEffects(abstract *AbstractGameResult, theme *Theme) []SoundEffect {
 	var sounds []SoundEffect
-	
+
 	// 基础旋转音效
 	if spinSound, exists := theme.Sounds[SoundTypeSpin]; exists {
 		sounds = append(sounds, spinSound)
 	}
-	
+
 	// 获胜音效
 	if abstract.IsWin {
 		soundType := r.getSoundTypeForWin(abstract.WinType)
@@ -302,21 +306,21 @@ func (r *DefaultThemeRenderer) generateSoundEffects(abstract *AbstractGameResult
 			sounds = append(sounds, winSound)
 		}
 	}
-	
+
 	// 特殊功能音效
 	for range abstract.Features {
 		if featureSound, exists := theme.Sounds[SoundTypeFeature]; exists {
 			sounds = append(sounds, featureSound)
 		}
 	}
-	
+
 	return sounds
 }
 
 // generateVisualEffects 生成视觉特效
 func (r *DefaultThemeRenderer) generateVisualEffects(abstract *AbstractGameResult, theme *Theme) []VisualEffect {
 	var effects []VisualEffect
-	
+
 	// 获胜特效
 	if abstract.IsWin {
 		effectType := r.getEffectTypeForWin(abstract.WinType)
@@ -335,7 +339,7 @@ func (r *DefaultThemeRenderer) generateVisualEffects(abstract *AbstractGameResul
 			}
 		}
 	}
-	
+
 	return effects
 }
 
@@ -388,10 +392,10 @@ func (r *DefaultThemeRenderer) calculateEffectIntensity(winType WinType) float64
 
 func (r *DefaultThemeRenderer) getDefaultSymbol(symbolID int) ThemeSymbol {
 	return ThemeSymbol{
-		ID:       symbolID,
-		Name:     fmt.Sprintf("Symbol_%d", symbolID),
-		ImageURL: fmt.Sprintf("/images/symbols/default_%d.png", symbolID),
-		Rarity:   RarityCommon,
+		ID:         symbolID,
+		Name:       fmt.Sprintf("Symbol_%d", symbolID),
+		ImageURL:   fmt.Sprintf("/images/symbols/default_%d.png", symbolID),
+		Rarity:     RarityCommon,
 		Properties: make(map[string]interface{}),
 	}
 }
@@ -500,9 +504,9 @@ func (r *DefaultThemeRenderer) registerBuiltinThemes() {
 			},
 		},
 	}
-	
+
 	r.themes["classic"] = classicTheme
-	
+
 	// 可以继续添加其他主题...
 	// 水果主题、埃及主题、海洋主题等
 }
@@ -524,7 +528,7 @@ func (tm *ThemeManager) ProcessGameResult(abstract *AbstractGameResult, themeID 
 	if themeID == "" {
 		themeID = "classic" // 默认主题
 	}
-	
+
 	return tm.renderer.RenderResult(abstract, themeID)
 }
 
@@ -539,6 +543,6 @@ func (tm *ThemeManager) LoadThemeFromJSON(jsonData []byte) error {
 	if err := json.Unmarshal(jsonData, &theme); err != nil {
 		return fmt.Errorf("failed to parse theme JSON: %w", err)
 	}
-	
+
 	return tm.renderer.RegisterTheme(&theme)
 }

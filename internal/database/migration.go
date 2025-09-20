@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/wfunc/slot-game/internal/logger"
 	"github.com/wfunc/slot-game/internal/models"
@@ -82,13 +83,28 @@ func AutoMigrate() error {
 
 	// 设置 SQLite 专用配置，避免锁定问题
 	if DB.Dialector.Name() == "sqlite" {
-		// 禁用外键约束，避免重建表时的问题
+		// 临时禁用外键约束，避免重建表时的问题
 		DB.Exec("PRAGMA foreign_keys = OFF")
-		defer DB.Exec("PRAGMA foreign_keys = ON")
+		defer func() {
+			DB.Exec("PRAGMA foreign_keys = ON")
+		}()
+
+		// 设置更长的锁等待时间（30秒）
+		DB.Exec("PRAGMA busy_timeout = 30000")
 	}
 
 	for _, model := range migrationModels {
 		tableName := getTableName(model)
+
+		// 对于serial_logs表，如果已经存在就完全跳过迁移
+		if tableName == "serial_logs" {
+			var foundTableName string
+			err := DB.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name='serial_logs'").Scan(&foundTableName).Error
+			if err == nil && foundTableName != "" {
+				logger.Info("serial_logs表已存在，跳过迁移", zap.String("table", tableName))
+				continue
+			}
+		}
 
 		// 检查表是否存在且有数据
 		if shouldSkipMigration(tableName) {
@@ -103,7 +119,15 @@ func AutoMigrate() error {
 			continue
 		}
 
-		if err := DB.AutoMigrate(model); err != nil {
+		// 执行迁移，如果失败则重试一次
+		err := DB.AutoMigrate(model)
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "locked") {
+			logger.Warn("表锁定，等待后重试", zap.String("table", tableName))
+			time.Sleep(2 * time.Second)
+			err = DB.AutoMigrate(model)
+		}
+
+		if err != nil {
 			// 如果错误涉及jackpot表，忽略它（可能是其他表引用了jackpot）
 			if strings.Contains(strings.ToLower(err.Error()), "jackpot") {
 				logger.Warn("忽略与jackpot相关的迁移错误", zap.Error(err))
@@ -330,25 +354,31 @@ func shouldSkipMigration(tableName string) bool {
 	// 对于serial_logs这种大表，检查是否已存在且有大量数据
 	if tableName == "serial_logs" {
 		var count int64
-		var exists bool
+		var foundTableName string
 
-		// 检查表是否存在
-		err := DB.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&exists).Error
-		if err != nil || !exists {
+		// 检查表是否存在 - 修复：应该扫描到 string 而不是 bool
+		err := DB.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name=?", "serial_logs").Scan(&foundTableName).Error
+		if err != nil || foundTableName == "" {
+			// 表不存在，需要创建
 			return false
 		}
 
 		// 检查表中的数据量
-		DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count)
+		err = DB.Raw("SELECT COUNT(*) FROM serial_logs").Scan(&count).Error
+		if err != nil {
+			// 查询失败，可能表结构有问题，不跳过迁移
+			logger.Warn("检查serial_logs数据量失败", zap.Error(err))
+			return false
+		}
 
 		// 如果表存在且数据量超过10000条，跳过迁移
 		if count > 10000 {
 			logger.Info("表中数据量较大，跳过AutoMigrate",
-				zap.String("table", tableName),
+				zap.String("table", "serial_logs"),
 				zap.Int64("count", count))
 
 			// 仅添加新的索引，不修改表结构
-			ensureIndexesForLargeTable(tableName)
+			ensureIndexesForLargeTable("serial_logs")
 			return true
 		}
 	}
