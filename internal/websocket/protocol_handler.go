@@ -296,6 +296,14 @@ func (c *ProtocolClient) Close() {
 			zap.String("client_id", c.ID),
 			zap.Int64("msg_count", c.msgCount),
 			zap.Duration("duration", time.Since(c.lastPing)))
+
+		// 通知handler清理资源
+		if c.handler != nil {
+			// 尝试类型断言，看是否支持cleanup接口
+			if cleanupHandler, ok := c.handler.(interface{ OnClientDisconnect(client *ProtocolClient) }); ok {
+				cleanupHandler.OnClientDisconnect(c)
+			}
+		}
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/wfunc/slot-game/internal/config"
@@ -71,6 +72,13 @@ func Init(cfg *config.DatabaseConfig) error {
 
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
+	}
+
+	// SQLite特殊优化：立即启用WAL模式和性能优化
+	if cfg.Driver == "sqlite" || cfg.Driver == "sqlite3" {
+		if err := optimizeSQLiteImmediately(); err != nil {
+			logger.Warn("SQLite优化失败", zap.Error(err))
+		}
 	}
 
 	// 获取底层SQL数据库实例
@@ -211,16 +219,43 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 	}
 }
 
+// optimizeSQLiteImmediately 立即优化SQLite性能，在连接后立即执行
+func optimizeSQLiteImmediately() error {
+	// 最关键的优化：立即启用WAL模式以避免锁问题
+	pragmas := []string{
+		"PRAGMA journal_mode = WAL",           // 必须首先执行，避免锁问题
+		"PRAGMA busy_timeout = 30000",         // 设置忙等待超时为30秒
+		"PRAGMA synchronous = NORMAL",         // 降低同步级别，提高写入性能
+		"PRAGMA cache_size = -2000000",        // 设置缓存大小为2GB
+		"PRAGMA temp_store = MEMORY",          // 使用内存存储临时表
+		"PRAGMA mmap_size = 30000000000",      // 使用内存映射提高读取性能
+		"PRAGMA foreign_keys = ON",            // 启用外键约束
+	}
+
+	for _, pragma := range pragmas {
+		if err := DB.Exec(pragma).Error; err != nil {
+			// WAL模式失败是严重问题，其他可以忽略
+			if strings.Contains(pragma, "journal_mode") {
+				return fmt.Errorf("启用WAL模式失败: %w", err)
+			}
+			logger.Warn("设置SQLite参数失败", zap.String("pragma", pragma), zap.Error(err))
+		}
+	}
+
+	logger.Info("SQLite WAL模式和性能优化已启用")
+	return nil
+}
+
 // ensureSQLiteDir 确保SQLite数据文件目录存在
 func ensureSQLiteDir(dsn string) error {
 	// 获取数据文件的目录路径
 	dir := filepath.Dir(dsn)
-	
+
 	// 如果是内存数据库，直接返回
 	if dsn == ":memory:" || dir == "." || dir == "" {
 		return nil
 	}
-	
+
 	// 检查目录是否存在
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		// 创建目录（包括父目录）
@@ -229,6 +264,6 @@ func ensureSQLiteDir(dsn string) error {
 		}
 		logger.Info("创建SQLite数据目录", zap.String("path", dir))
 	}
-	
+
 	return nil
 }

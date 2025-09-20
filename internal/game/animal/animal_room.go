@@ -2,6 +2,7 @@ package animal
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -359,10 +360,41 @@ func (r *AnimalRoom) GetAnimals() []*pb.PRoute {
 	return routes
 }
 
+// GetAvailableSeat 获取可用座位（1-4）
+func (r *AnimalRoom) GetAvailableSeat() uint32 {
+	occupiedSeats := make(map[uint32]bool)
+	for _, player := range r.players {
+		occupiedSeats[player.Seat] = true
+	}
+
+	for seat := uint32(1); seat <= 4; seat++ {
+		if !occupiedSeats[seat] {
+			return seat
+		}
+	}
+	return 0 // 无可用座位
+}
+
+// IsFull 房间是否已满
+func (r *AnimalRoom) IsFull() bool {
+	return len(r.players) >= 4
+}
+
 // EnterRoom 玩家进入房间（基于Erlang的enter_zoo）
-func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon string) (*pb.M_1801Toc, error) {
+func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon, clientID string) (*pb.M_1801Toc, uint32, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// 检查房间是否已满
+	if r.IsFull() {
+		return nil, 0, fmt.Errorf("room is full")
+	}
+
+	// 分配座位
+	seat := r.GetAvailableSeat()
+	if seat == 0 {
+		return nil, 0, fmt.Errorf("no available seat")
+	}
 
 	// 创建玩家会话
 	session := &PlayerSession{
@@ -374,6 +406,8 @@ func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon string) (*pb.M_1801To
 		ZooType:   r.roomType,
 		EnteredAt: time.Now(),
 		Skills:    make(map[pb.EAnimalSkillType]*PlayerSkill),
+		Seat:      seat,
+		ClientID:  clientID,
 	}
 
 	r.players[playerID] = session
@@ -393,9 +427,49 @@ func (r *AnimalRoom) EnterRoom(playerID uint32, name, icon string) (*pb.M_1801To
 	r.logger.Info("[AnimalRoom] 玩家进入房间",
 		zap.Uint32("room_id", r.id),
 		zap.Uint32("player_id", playerID),
+		zap.Uint32("seat", seat),
 		zap.String("name", name))
 
-	return response, nil
+	return response, seat, nil
+}
+
+// RemovePlayer 移除玩家
+func (r *AnimalRoom) RemovePlayer(playerID uint32) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if player, exists := r.players[playerID]; exists {
+		delete(r.players, playerID)
+
+		r.logger.Info("[AnimalRoom] 玩家离开房间",
+			zap.Uint32("room_id", r.id),
+			zap.Uint32("player_id", playerID),
+			zap.Uint32("seat", player.Seat))
+
+		// 推送玩家离开消息给其他玩家
+		r.pushPlayerLeave(player)
+	}
+}
+
+// RemovePlayerByClientID 根据客户端ID移除玩家
+func (r *AnimalRoom) RemovePlayerByClientID(clientID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for playerID, player := range r.players {
+		if player.ClientID == clientID {
+			delete(r.players, playerID)
+
+			r.logger.Info("[AnimalRoom] 玩家断线离开房间",
+				zap.Uint32("room_id", r.id),
+				zap.Uint32("player_id", playerID),
+				zap.String("client_id", clientID))
+
+			// 推送玩家离开消息给其他玩家
+			r.pushPlayerLeave(player)
+			break
+		}
+	}
 }
 
 // LeaveRoom 玩家离开房间

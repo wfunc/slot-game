@@ -398,19 +398,43 @@ StandardError=append:/home/ztl/slot-game-arm64/logs/kiosk-error.log
 WantedBy=default.target
 EOF
 
-# 复制自动化安装脚本
-echo -e "${GREEN}复制自动化安装脚本...${NC}"
+# 复制安装和维护脚本
+echo -e "${GREEN}复制安装和维护脚本...${NC}"
+
+# 复制主安装脚本
 if [ -f "scripts/install.sh" ]; then
     cp scripts/install.sh $RELEASE_DIR/install.sh
     chmod +x $RELEASE_DIR/install.sh
     echo -e "${GREEN}✓ 已复制自动化安装脚本${NC}"
-else
-    echo -e "${YELLOW}⚠ 未找到自动化安装脚本，使用内置版本${NC}"
-    # 创建备用安装脚本（简化版）
+fi
+
+# 复制智能安装脚本V2（支持更新和数据库处理）
+if [ -f "scripts/install_v2.sh" ]; then
+    cp scripts/install_v2.sh $RELEASE_DIR/install_v2.sh
+    chmod +x $RELEASE_DIR/install_v2.sh
+    echo -e "${GREEN}✓ 已复制智能安装脚本V2${NC}"
+fi
+
+# 复制数据库维护脚本
+if [ -f "scripts/fix_db_lock.sh" ]; then
+    cp scripts/fix_db_lock.sh $RELEASE_DIR/fix_db_lock.sh
+    chmod +x $RELEASE_DIR/fix_db_lock.sh
+    echo -e "${GREEN}✓ 已复制数据库锁定修复脚本${NC}"
+fi
+
+if [ -f "scripts/optimize_db.sh" ]; then
+    cp scripts/optimize_db.sh $RELEASE_DIR/optimize_db.sh
+    chmod +x $RELEASE_DIR/optimize_db.sh
+    echo -e "${GREEN}✓ 已复制数据库优化脚本${NC}"
+fi
+
+# 如果都没找到，创建备用脚本
+if [ ! -f "$RELEASE_DIR/install.sh" ] && [ ! -f "$RELEASE_DIR/install_v2.sh" ]; then
+    echo -e "${YELLOW}⚠ 未找到任何安装脚本，使用内置版本${NC}"
     cat > $RELEASE_DIR/install.sh << 'EOF'
 #!/bin/bash
 echo "请使用最新的自动化安装脚本"
-echo "从项目仓库获取: scripts/install.sh"
+echo "从项目仓库获取: scripts/install.sh 或 scripts/install_v2.sh"
 exit 1
 EOF
 fi
@@ -419,22 +443,50 @@ fi
 cat > $RELEASE_DIR/README.md << 'EOF'
 # 老虎机游戏服务部署说明
 
-## 一键自动安装（推荐）
+## 一键自动安装/更新（推荐）
 
+### 全新安装
 ```bash
 # 解压并自动安装
 tar -xzf slot-game-arm64.tar.gz
 cd slot-game-arm64
-sudo ./install.sh
+sudo ./install.sh  # 或使用 sudo ./install_v2.sh
 
 # 安装完成后重启系统
 sudo reboot
+```
+
+### 更新升级（保留数据）
+```bash
+# 解压新版本
+tar -xzf slot-game-arm64.tar.gz
+cd slot-game-arm64
+
+# 使用V2脚本，自动备份并更新
+sudo ./install_v2.sh
+
+# 脚本会自动：
+# - 检测现有安装
+# - 备份数据库和配置
+# - 优化数据库性能
+# - 更新程序文件
+# - 重启服务
+```
+
+### 数据库问题修复
+```bash
+# 如果遇到 "database table is locked" 错误
+sudo ./fix_db_lock.sh /home/sg/slot-game/data/game.db
+
+# 定期优化数据库
+sudo ./optimize_db.sh /home/sg/slot-game/data/game.db
 ```
 
 **安装脚本会自动：**
 - 创建专用的 sg 用户运行 slot-game 服务
 - 配置 ztl 用户运行 chromium-kiosk 服务
 - 设置所有必要的权限和目录
+- 处理数据库迁移和优化
 - 配置服务开机自启动
 - 无需任何用户交互，完全自动化
 

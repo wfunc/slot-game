@@ -434,7 +434,8 @@ func (h *AnimalHandler) handleEnterRoom(session *AnimalSession, payload []byte) 
 	}
 
 	// 调用新的动物房间进入逻辑
-	resp, err := room.EnterRoom(session.PlayerID, session.Name, session.Icon)
+	// TODO: 需要传入clientID，暂时使用空字符串
+	resp, _, err := room.EnterRoom(session.PlayerID, session.Name, session.Icon, "")
 	if err != nil {
 		h.logger.Error("[AnimalHandler] 进入动物房间失败", zap.Error(err))
 		return

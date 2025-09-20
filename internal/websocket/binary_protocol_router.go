@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/wfunc/slot-game/internal/game/animal"
@@ -21,6 +22,7 @@ type BinaryProtocolRouter struct {
 	clientManager  *ClientManager
 	pushManager    *PushManager
 	animalRooms    map[uint32]*animal.AnimalRoom // roomID -> room
+	animalRoomsMutex sync.RWMutex
 	logger         *zap.Logger
 	db             *gorm.DB
 }
@@ -421,6 +423,28 @@ func (r *BinaryProtocolRouter) getSkillTypeForAnimal(animalType pb.EAnimal) pb.E
 	}
 }
 
+// OnClientDisconnect 处理客户端断开连接
+func (r *BinaryProtocolRouter) OnClientDisconnect(client *ProtocolClient) {
+	r.logger.Info("[路由] 处理客户端断开连接",
+		zap.String("client_id", client.ID))
+
+	// 从ClientManager中移除客户端
+	managedClient := r.clientManager.GetClient(client.ID)
+	if managedClient != nil && managedClient.RoomID > 0 {
+		// 从动物房间中移除玩家
+		room := r.GetAnimalRoom(managedClient.RoomID)
+		if room != nil {
+			room.RemovePlayerByClientID(client.ID)
+			r.logger.Info("[路由] 从房间移除玩家",
+				zap.String("client_id", client.ID),
+				zap.Uint32("room_id", managedClient.RoomID))
+		}
+	}
+
+	// 从ClientManager中移除
+	r.clientManager.RemoveClient(client.ID)
+}
+
 // handleAnimalEnterRoom 处理进入动物园房间
 func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg *ClientMessage) (*ServerMessage, error) {
 	r.logger.Info("[路由] 处理1801命令 - 进入动物园房间",
@@ -440,9 +464,52 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	// 将客户端加入到管理器
 	r.clientManager.AddClient(client)
 
-	// 模拟加入房间ID 1（默认房间）
+	// 使用真实的玩家ID (这里暂时使用客户端ID的hash值作为玩家ID)
+	playerID := uint32(len(client.ID)) // TODO: 从用户会话获取真实玩家ID
+
+	// 尝试加入默认房间（房间ID 1）
 	roomID := uint32(1)
-	playerID := uint32(1) // TODO: 从用户会话获取真实玩家ID
+	room := r.GetAnimalRoom(roomID)
+
+	// 如果房间不存在，创建新房间
+	if room == nil {
+		r.logger.Info("[路由] 房间不存在，创建新房间", zap.Uint32("room_id", roomID))
+		room = r.GetAnimalRoom(roomID) // 会自动创建
+	}
+
+	// 尝试加入房间，获取座位号
+	_, seat, err := room.EnterRoom(playerID, "Player", "", client.ID)
+	if err != nil {
+		// 房间满员，需要创建新房间
+		r.logger.Info("[路由] 房间满员，创建新房间", zap.Error(err))
+
+		// 获取下一个可用的房间ID
+		r.animalRoomsMutex.Lock()
+		roomID = uint32(len(r.animalRooms) + 1)
+		r.animalRoomsMutex.Unlock()
+
+		// 获取或创建新房间
+		room = r.GetAnimalRoom(roomID)
+
+		// 再次尝试加入新房间
+		_, seat, err = room.EnterRoom(playerID, "Player", "", client.ID)
+		if err != nil {
+			r.logger.Error("[路由] 无法加入新房间", zap.Error(err))
+			// 返回错误响应
+			return &ServerMessage{
+				ErrorID:    1001,  // 房间满员错误
+				DataStatus: 0,
+				Flag:       msg.Flag,
+				Cmd:        msg.Cmd,
+				Data:       []byte{},
+			}, err
+		}
+	}
+
+	r.logger.Info("[路由] 玩家成功加入房间",
+		zap.Uint32("player_id", playerID),
+		zap.Uint32("room_id", roomID),
+		zap.Uint32("seat", seat))
 
 	// 将客户端加入到房间
 	r.clientManager.JoinRoom(client.ID, roomID, playerID)
@@ -472,7 +539,7 @@ func (r *BinaryProtocolRouter) handleAnimalEnterRoom(client *ProtocolClient, msg
 	}
 
 	// 获取房间内现有的动物并发送给新加入的客户端
-	room := r.GetAnimalRoom(roomID)
+	room = r.GetAnimalRoom(roomID)
 	if room != nil {
 		animals := room.GetAnimals()
 		if len(animals) > 0 {

@@ -263,7 +263,7 @@ func (m *Manager) EnterRoom(playerID uint32, name, icon string, vip uint32, req 
 		resp.FreeGold = proto.Uint64(player.FreeGold)
 	}
 
-	resp.Cj = proto.String(fmt.Sprintf("%d", room.jackpot))
+	resp.Cj = proto.String(fmt.Sprintf("%d", room.jackpot.GetCurrentAmount()))
 
 	pushes := []PushMessage{}
 	if !exists {

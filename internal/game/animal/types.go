@@ -117,6 +117,8 @@ type PlayerSession struct {
 	SkillEnds  map[pb.EAnimalSkillType]time.Time
 	CurrentBet uint32
 	TotalWin   uint64
+	Seat       uint32  // 座位号 1-4
+	ClientID   string  // WebSocket客户端ID
 }
 
 // Player 玩家信息（跨房间共享）
